@@ -62,17 +62,17 @@ func _make_ui() -> void:
     home = VBoxContainer.new()
     home.add_theme_constant_override("separation", 25)
     layout.add_child(home)
-    home.add_child(_label("PLAY · CREATE · KEEP THE DREAM\nGodot Android battle V0.0.9", 24))
+    home.add_child(_label("PLAY · CREATE · KEEP THE DREAM\n安卓戰鬥測試 V0.0.9", 24))
     var start := _button("開始戰鬥")
     start.pressed.connect(_show_battle)
     home.add_child(start)
     battle = VBoxContainer.new()
     battle.add_theme_constant_override("separation", 14)
     layout.add_child(battle)
-    status = _label("BATTLE TEST", 32)
+    status = _label("戰鬥測試", 32)
     status.add_theme_color_override("font_color", Color("#e8c36d"))
     battle.add_child(status)
-    score = _label("ARMY A vs ARMY B", 24)
+    score = _label("我軍 VS 敵軍", 24)
     battle.add_child(score)
     field = Control.new()
     field.custom_minimum_size = Vector2(620, FIELD_DISPLAY_H)
@@ -83,11 +83,11 @@ func _make_ui() -> void:
     var buttons := HBoxContainer.new()
     buttons.add_theme_constant_override("separation", 12)
     battle.add_child(buttons)
-    var restart := _button("RESTART")
+    var restart := _button("重新開始")
     restart.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     restart.pressed.connect(_restart)
     buttons.add_child(restart)
-    var back := _button("BACK")
+    var back := _button("返回")
     back.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     back.pressed.connect(_show_home)
     buttons.add_child(back)
@@ -184,7 +184,7 @@ func _restart() -> void:
     active = true
     tick = 0.0
     battle_elapsed = 0.0
-    status.text = "BATTLE TEST"
+    status.text = "戰鬥測試"
     _refresh()
 
 func _process(delta: float) -> void:
@@ -203,8 +203,8 @@ func _process(delta: float) -> void:
         return
     if battle_elapsed >= ROUND_SECONDS:
         active = false
-        status.text = "99s! BOTH TEAMS RETREAT"
-        details.text = "Round %d ended. HP and surviving troops retained.\nRESTART begins a new test." % round_count
+        status.text = "99秒到！雙方撤退"
+        details.text = "Round %d ended. HP and surviving troops retained.\n重新開始 begins a new test." % round_count
         field.queue_redraw()
         return
     # Each actor selects a nearby enemy, approaches or attacks independently.
@@ -286,11 +286,11 @@ func _end_battle() -> void:
     active = false
     _recount_armies()
     if _team_defeated(0) and _team_defeated(1):
-        status.text = "DRAW! ALL GENERALS FALLEN"
+        status.text = "平局！雙方武將全滅"
     elif _team_defeated(1):
-        status.text = "ARMY A WINS! GENERALS DEFEATED"
+        status.text = "我軍勝利！敵方武將全滅"
     else:
-        status.text = "ARMY B WINS! GENERALS DEFEATED"
+        status.text = "敵軍勝利！我方武將全滅"
     details.text = "A troops: %d | B troops: %d\nVictory is decided by generals, not soldiers." % [_total_soldiers(0), _total_soldiers(1)]
     field.queue_redraw()
 
