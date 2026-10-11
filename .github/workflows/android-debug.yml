@@ -7,7 +7,7 @@ on:
 
 jobs:
   android-debug:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container:
       image: barichello/godot-ci:4.4.1
     steps:
@@ -67,6 +67,21 @@ jobs:
           test -d "$SDK_DIR/platforms/android-35"
       - name: Import Godot project
         run: godot --headless --editor --path . --import --quit
+      - name: Diagnose Android export configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== Effective paths ==="
+          printf 'HOME=%s\\nANDROID_HOME=%s\\nANDROID_SDK_ROOT=%s\\nJAVA_HOME=%s\\n' "$HOME" "${ANDROID_HOME:-unset}" "${ANDROID_SDK_ROOT:-unset}" "${JAVA_HOME:-unset}"
+          echo "=== SDK build tools ==="
+          ls -la "$ANDROID_HOME/build-tools"
+          echo "=== SDK platforms ==="
+          ls -la "$ANDROID_HOME/platforms"
+          echo "=== Godot editor settings ==="
+          ls -la "$HOME/.config/godot"
+          grep -E 'export/android/(android_sdk_path|java_sdk_path) ' "$HOME/.config/godot/editor_settings-4.4.tres" || true
+          echo "=== Export preset ==="
+          grep -E '^(name|platform|package/unique_name|gradle_build/use_gradle_build)=' export_presets.cfg || true
       - name: Export Android debug APK
         run: |
           mkdir -p build
