@@ -52,7 +52,7 @@ jobs:
           ls -la "$SDK_DIR/build-tools"
           echo "Godot editor settings path: $HOME/.config/godot/editor_settings-4.4.tres"
           mkdir -p "$HOME/.config/godot"
-          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          cat > "$HOME/.config/godot/editor_settings-4.4.tres" <<EOF
           [gd_resource type="EditorSettings" format=3]
 
           [resource]
@@ -62,12 +62,15 @@ jobs:
           export/android/debug_keystore_user = "androiddebugkey"
           export/android/debug_keystore_pass = "android"
           EOF
+          echo "Confirm Godot editor settings:"
+          grep -E "export/android/(android_sdk_path|java_sdk_path|debug_keystore)" "$HOME/.config/godot/editor_settings-4.4.tres" | sed -E 's/(pass = ).*/\1[REDACTED]/'
+          test -d "$SDK_DIR/platforms/android-35"
       - name: Import Godot project
         run: godot --headless --editor --path . --import --quit
       - name: Export Android debug APK
         run: |
           mkdir -p build
-          godot --headless --verbose --editor --path . --export-debug "Android" build/mcx-godot-test-debug.apk
+          godot --headless --verbose --path . --export-debug "Android" build/mcx-godot-test-debug.apk
           test -s build/mcx-godot-test-debug.apk
       - name: Upload APK
         uses: actions/upload-artifact@v4
