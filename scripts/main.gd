@@ -39,6 +39,7 @@ var general_stats := [{"might": 80, "intellect": 65, "loyalty": 70, "mp": 80}, {
 # Prototype item stock: permanent attributes +1..10, loyalty jewels, and HP/MP elixirs +10..50.
 var inventory := {"attribute_pill": 2, "loyalty_jewel": 2, "hp_elixir": 2, "mp_elixir": 2}
 var item_info: Label
+const ITEM_NAMES := {"attribute_pill": "屬性丹藥", "loyalty_jewel": "忠誠珠寶", "hp_elixir": "生命靈藥", "mp_elixir": "技力靈藥"}
 
 func _ready() -> void:
     _make_ui()
@@ -95,7 +96,7 @@ func _make_ui() -> void:
     item_info = _label("", 18)
     home.add_child(item_info)
     for item_key in ["attribute_pill", "loyalty_jewel", "hp_elixir", "mp_elixir"]:
-        var item_button := _button("USE " + item_key.to_upper() + " (ARMY A)")
+        var item_button := _button("使用「" + ITEM_NAMES[item_key] + "」")
         item_button.custom_minimum_size.y = 48.0
         item_button.pressed.connect(_use_item.bind(item_key))
         home.add_child(item_button)
@@ -123,7 +124,7 @@ func _refresh_item_info() -> void:
     if item_info == null:
         return
     var s: Dictionary = general_stats[0]
-    item_info.text = "A Might %d  Int %d  Loyalty %d  MP %d/999\nItems: pill %d  jewel %d  HP %d  MP %d" % [int(s["might"]), int(s["intellect"]), int(s["loyalty"]), int(s["mp"]), int(inventory["attribute_pill"]), int(inventory["loyalty_jewel"]), int(inventory["hp_elixir"]), int(inventory["mp_elixir"])]
+    item_info.text = "我軍武力 %d　智力 %d　忠誠 %d　技力 %d/999\n丹藥 %d　珠寶 %d　生命藥 %d　技力藥 %d" % [int(s["might"]), int(s["intellect"]), int(s["loyalty"]), int(s["mp"]), int(inventory["attribute_pill"]), int(inventory["loyalty_jewel"]), int(inventory["hp_elixir"]), int(inventory["mp_elixir"])]
 
 func _label(value: String, font_size: int) -> Label:
     var l := Label.new()
