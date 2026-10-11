@@ -1,8 +1,12 @@
 extends Control
 
-# MCX GAMES V0.0.8: automatic generals, formation spacing and troop reconciliation.
+# MCX GAMES V0.0.9: generals decide victory, soldiers can damage generals, 99s rounds.
 # Visual and balance values are placeholders for Android prototype testing.
-const MAX_HP := 100
+const MAX_HP := 999
+const ROUND_SECONDS := 99.0
+const REST_HEAL := 10.0
+const GENERAL_MAX_HP := 240.0
+const GENERAL_ATTACK_INTERVAL := 0.65
 const FIELD_W := 920.0
 const SPEED := 90.0
 const MAX_VISIBLE_PER_ARMY := 100
@@ -30,6 +34,11 @@ var starting_troops := [1000, 1000]
 var soldiers_visual: Array[Dictionary] = []
 var battle_elapsed := 0.0
 var generals: Array[Dictionary] = []
+var round_count := 1
+var general_stats := [{"might": 80, "intellect": 65, "loyalty": 70, "mp": 80}, {"might": 75, "intellect": 70, "loyalty": 70, "mp": 90}]
+# Prototype item stock: permanent attributes +1..10, loyalty jewels, and HP/MP elixirs +10..50.
+var inventory := {"attribute_pill": 2, "loyalty_jewel": 2, "hp_elixir": 2, "mp_elixir": 2}
+var item_info: Label
 
 func _ready() -> void:
     _make_ui()
@@ -53,7 +62,7 @@ func _make_ui() -> void:
     home = VBoxContainer.new()
     home.add_theme_constant_override("separation", 25)
     layout.add_child(home)
-    home.add_child(_label("PLAY · CREATE · KEEP THE DREAM\nGodot Android battle V0.0.8", 24))
+    home.add_child(_label("PLAY · CREATE · KEEP THE DREAM\nGodot Android battle V0.0.9", 24))
     var start := _button("START BATTLE TEST")
     start.pressed.connect(_show_battle)
     home.add_child(start)
@@ -83,6 +92,38 @@ func _make_ui() -> void:
     back.pressed.connect(_show_home)
     buttons.add_child(back)
     battle.visible = false
+    item_info = _label("", 18)
+    home.add_child(item_info)
+    for item_key in ["attribute_pill", "loyalty_jewel", "hp_elixir", "mp_elixir"]:
+        var item_button := _button("USE " + item_key.to_upper() + " (ARMY A)")
+        item_button.custom_minimum_size.y = 48.0
+        item_button.pressed.connect(_use_item.bind(item_key))
+        home.add_child(item_button)
+    _refresh_item_info()
+
+func _use_item(item_key: String) -> void:
+    if int(inventory.get(item_key, 0)) <= 0:
+        return
+    inventory[item_key] = int(inventory[item_key]) - 1
+    var stats: Dictionary = general_stats[0]
+    match item_key:
+        "attribute_pill":
+            stats["might"] = mini(999, int(stats["might"]) + 5) # Demo +5, legal item range +1..10.
+        "loyalty_jewel":
+            stats["loyalty"] = mini(100, int(stats["loyalty"]) + 10)
+        "hp_elixir":
+            if generals.size() > 0:
+                generals[0]["hp"] = minf(float(generals[0]["max_hp"]), float(generals[0]["hp"]) + 30.0)
+        "mp_elixir":
+            stats["mp"] = mini(999, int(stats["mp"]) + 30)
+    general_stats[0] = stats
+    _refresh_item_info()
+
+func _refresh_item_info() -> void:
+    if item_info == null:
+        return
+    var s: Dictionary = general_stats[0]
+    item_info.text = "A Might %d  Int %d  Loyalty %d  MP %d/999\nItems: pill %d  jewel %d  HP %d  MP %d" % [int(s["might"]), int(s["intellect"]), int(s["loyalty"]), int(s["mp"]), int(inventory["attribute_pill"]), int(inventory["loyalty_jewel"]), int(inventory["hp_elixir"]), int(inventory["mp_elixir"])]
 
 func _label(value: String, font_size: int) -> Label:
     var l := Label.new()
@@ -103,6 +144,7 @@ func _show_home() -> void:
     active = false
     home.visible = true
     battle.visible = false
+    _refresh_item_info()
 
 func _show_battle() -> void:
     home.visible = false
@@ -113,11 +155,12 @@ func _restart() -> void:
     units.clear()
     soldiers_visual.clear()
     generals.clear()
+    round_count = 1
     # One army has exactly 100 visual soldiers representing 1000 troops.
     # The three groups are 30 infantry, 30 spears and 40 archers.
     for team in range(2):
         var base_x: float = 125.0 if team == 0 else 795.0
-        generals.append({"team": team, "x": base_x, "y": 315.0, "hp": 160.0, "cooldown": 0.0})
+        generals.append({"team": team, "x": base_x, "y": 315.0, "hp": GENERAL_MAX_HP, "max_hp": GENERAL_MAX_HP, "cooldown": 0.0})
         for kind in range(4):
             var count: int = 30 if kind < 2 else (40 if kind == 2 else 0)
             var group_id: int = units.size()
@@ -155,11 +198,13 @@ func _process(delta: float) -> void:
     for i in range(soldiers_visual.size()):
         if float(soldiers_visual[i]["hp"]) > 0.0:
             living[int(soldiers_visual[i]["team"])].append(i)
-    if living[0].is_empty() or living[1].is_empty():
+    if _team_defeated(0) or _team_defeated(1):
+        _end_battle()
+        return
+    if battle_elapsed >= ROUND_SECONDS:
         active = false
-        status.text = "ARMY A WINS!" if not living[0].is_empty() else ("ARMY B WINS!" if not living[1].is_empty() else "DRAW!")
-        _recount_armies()
-        details.text = "A survivors: %d  |  B survivors: %d\nTap RESTART to fight again." % [_total_soldiers(0), _total_soldiers(1)]
+        status.text = "99s! BOTH TEAMS RETREAT"
+        details.text = "Round %d ended. HP and surviving troops retained.\nRESTART begins a new test." % round_count
         field.queue_redraw()
         return
     # Each actor selects a nearby enemy, approaches or attacks independently.
@@ -181,9 +226,19 @@ func _process(delta: float) -> void:
                 if distance_sq < best:
                     best = distance_sq
                     nearest = enemy_index
-            if nearest < 0:
+            # Soldiers also target living enemy generals, even after enemy soldiers are gone.
+            var general_target := -1
+            for gi in range(generals.size()):
+                var g: Dictionary = generals[gi]
+                if int(g["team"]) != team and float(g["hp"]) > 0.0:
+                    var gd: float = Vector2(float(g["x"]) - sx, float(g["y"]) - sy).length_squared()
+                    if gd < best:
+                        best = gd
+                        general_target = gi
+                        nearest = -1
+            if nearest < 0 and general_target < 0:
                 continue
-            var target: Dictionary = soldiers_visual[nearest]
+            var target: Dictionary = generals[general_target] if general_target >= 0 else soldiers_visual[nearest]
             var kind: int = int(s["kind"])
             var reach: float = 125.0 if kind == 2 else SOLDIER_REACH
             var dist: float = sqrt(best)
@@ -206,11 +261,14 @@ func _process(delta: float) -> void:
                 s["y"] = clampf(sy + move_dir.y * speed * dt, 15.0, FIELD_DISPLAY_H - 20.0)
             elif float(s["cooldown"]) <= 0.0:
                 var damage: float = 1.0
-                var enemy_kind: int = int(target["kind"])
+                var enemy_kind: int = int(target.get("kind", -1))
                 if (kind == 0 and enemy_kind == 2) or (kind == 2 and enemy_kind == 1) or (kind == 1 and enemy_kind == 0):
                     damage = 1.5
                 target["hp"] = maxf(0.0, float(target["hp"]) - damage)
-                soldiers_visual[nearest] = target
+                if general_target >= 0:
+                    generals[general_target] = target
+                else:
+                    soldiers_visual[nearest] = target
                 s["cooldown"] = SOLDIER_ATTACK_INTERVAL * (1.3 if kind == 2 else 1.0)
                 s["attack_flash"] = 0.15
             soldiers_visual[index] = s
@@ -218,27 +276,53 @@ func _process(delta: float) -> void:
     _recount_armies()
     _refresh()
 
+func _team_defeated(team: int) -> bool:
+    for g in generals:
+        if int(g["team"]) == team and float(g["hp"]) > 0.0:
+            return false
+    return true
+
+func _end_battle() -> void:
+    active = false
+    _recount_armies()
+    if _team_defeated(0) and _team_defeated(1):
+        status.text = "DRAW! ALL GENERALS FALLEN"
+    elif _team_defeated(1):
+        status.text = "ARMY A WINS! GENERALS DEFEATED"
+    else:
+        status.text = "ARMY B WINS! GENERALS DEFEATED"
+    details.text = "A troops: %d | B troops: %d\nVictory is decided by generals, not soldiers." % [_total_soldiers(0), _total_soldiers(1)]
+    field.queue_redraw()
+
 func _move_generals(dt: float) -> void:
-    # Generals fight automatically in this milestone. Manual control comes later.
     for gi in range(generals.size()):
         var general: Dictionary = generals[gi]
         if float(general["hp"]) <= 0.0:
             continue
         var nearest := -1
+        var enemy_general := -1
         var best := INF
         for si in range(soldiers_visual.size()):
             var soldier: Dictionary = soldiers_visual[si]
             if int(soldier["team"]) == int(general["team"]) or float(soldier["hp"]) <= 0.0:
                 continue
-            var dx: float = float(soldier["x"]) - float(general["x"])
-            var dy: float = float(soldier["y"]) - float(general["y"])
-            var distance_sq: float = dx * dx + dy * dy
-            if distance_sq < best:
-                best = distance_sq
+            var dist_sq: float = Vector2(float(soldier["x"]) - float(general["x"]), float(soldier["y"]) - float(general["y"])).length_squared()
+            if dist_sq < best:
+                best = dist_sq
                 nearest = si
-        if nearest < 0:
+                enemy_general = -1
+        for other_gi in range(generals.size()):
+            var opponent: Dictionary = generals[other_gi]
+            if int(opponent["team"]) == int(general["team"]) or float(opponent["hp"]) <= 0.0:
+                continue
+            var dist_sq: float = Vector2(float(opponent["x"]) - float(general["x"]), float(opponent["y"]) - float(general["y"])).length_squared()
+            if dist_sq < best:
+                best = dist_sq
+                enemy_general = other_gi
+                nearest = -1
+        if nearest < 0 and enemy_general < 0:
             continue
-        var target: Dictionary = soldiers_visual[nearest]
+        var target: Dictionary = generals[enemy_general] if enemy_general >= 0 else soldiers_visual[nearest]
         var distance: float = sqrt(best)
         general["cooldown"] = maxf(0.0, float(general["cooldown"]) - dt)
         if distance > GENERAL_REACH:
@@ -247,8 +331,11 @@ func _move_generals(dt: float) -> void:
             general["y"] = clampf(float(general["y"]) + direction.y * GENERAL_SPEED * dt, 12.0, FIELD_DISPLAY_H - 12.0)
         elif float(general["cooldown"]) <= 0.0:
             target["hp"] = maxf(0.0, float(target["hp"]) - GENERAL_DAMAGE)
-            soldiers_visual[nearest] = target
-            general["cooldown"] = 0.65
+            if enemy_general >= 0:
+                generals[enemy_general] = target
+            else:
+                soldiers_visual[nearest] = target
+            general["cooldown"] = GENERAL_ATTACK_INTERVAL
         generals[gi] = general
 
 func _recount_armies() -> void:
@@ -272,9 +359,9 @@ func _total_soldiers(team: int) -> int:
     return total
 
 func _refresh() -> void:
-    score.text = "A %d / 1000 troops   VS   B %d / 1000" % [_total_soldiers(0), _total_soldiers(1)]
+    score.text = "A %d troops / %d HP  VS  B %d troops / %d HP" % [_total_soldiers(0), int(generals[0]["hp"]), _total_soldiers(1), int(generals[1]["hp"])]
     if active:
-        details.text = "100 independent soldiers per army\nInfantry > Archers > Spears > Infantry\nA losses: %d   B losses: %d" % [1000 - _total_soldiers(0), 1000 - _total_soldiers(1)]
+        details.text = "Time: %ds / 99s | Generals decide victory\nSoldiers can damage generals | A losses: %d B losses: %d" % [int(battle_elapsed), 1000 - _total_soldiers(0), 1000 - _total_soldiers(1)]
     field.queue_redraw()
 
 func _draw_field() -> void:
