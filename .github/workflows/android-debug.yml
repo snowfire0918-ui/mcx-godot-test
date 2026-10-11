@@ -13,6 +13,44 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Prepare Android debug export environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOME=/github/home
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.4.1.stable"
+          TEMPLATE_DIR="$(find / -type f -name android_debug.apk -path '*/export_templates/*' -print -quit 2>/dev/null || true)"
+          if [ -n "$TEMPLATE_DIR" ]; then
+            cp "$(dirname "$TEMPLATE_DIR")/android_debug.apk" "$HOME/.local/share/godot/export_templates/4.4.1.stable/"
+            cp "$(dirname "$TEMPLATE_DIR")/android_release.apk" "$HOME/.local/share/godot/export_templates/4.4.1.stable/"
+          else
+            curl -fL --retry 3 -o /tmp/templates.tpz "https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_export_templates.tpz"
+            unzip -q /tmp/templates.tpz 'templates/android_debug.apk' 'templates/android_release.apk' -d /tmp/godot-export
+            cp /tmp/godot-export/templates/android_*.apk "$HOME/.local/share/godot/export_templates/4.4.1.stable/"
+          fi
+          JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")"
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "GODOT_JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          mkdir -p "$HOME/.config/godot"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            mkdir -p "$HOME/.android"
+            keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=MCX,C=MY"
+          fi
+          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/opt/android-sdk}}"
+          echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
+          printf '[gd_resource type="EditorSettings" format=3]\n' > /tmp/editor_settings_placeholder
+          mkdir -p "$HOME/.config/godot"
+          cat > "$HOME/.config/godot/editor_settings-4.4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$SDK_DIR"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$HOME/.android/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF
       - name: Import Godot project
         run: godot --headless --editor --path . --import --quit
       - name: Export Android debug APK
