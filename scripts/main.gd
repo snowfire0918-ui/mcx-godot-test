@@ -63,7 +63,7 @@ func _make_ui() -> void:
     home.add_theme_constant_override("separation", 25)
     layout.add_child(home)
     home.add_child(_label("PLAY · CREATE · KEEP THE DREAM\nGodot Android battle V0.0.9", 24))
-    var start := _button("START BATTLE TEST")
+    var start := _button("開始戰鬥")
     start.pressed.connect(_show_battle)
     home.add_child(start)
     battle = VBoxContainer.new()
