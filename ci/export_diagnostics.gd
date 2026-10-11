@@ -1,20 +1,25 @@
 extends SceneTree
 
+# EditorExport is internal C++, not a GDScript API. Inspect the config safely.
+# Actual template / SDK / signing validation remains the export command's job.
 func _initialize() -> void:
-    var export_api := EditorExport
-    print("MCX_DIAG: Export preset count: ", export_api.get_export_presets().size())
-    for preset in export_api.get_export_presets():
-        print("MCX_DIAG: Preset: ", preset.get_name(), " platform: ", preset.get_platform().get_name())
-        var platform := preset.get_platform()
-        var errors := []
-        var missing_templates := false
-        var ok := platform.can_export(preset, true)
-        print("MCX_DIAG: can_export: ", ok)
-        for prop in platform.get_export_options():
-            var key: String = prop.get("name", "")
-            if key.is_empty():
-                continue
-            var warning: String = platform.get_option_warning(preset, key)
-            if not warning.is_empty():
-                print("MCX_DIAG: Warning for ", key, ": ", warning)
-    quit()
+    var config := ConfigFile.new()
+    var error := config.load("res://export_presets.cfg")
+    if error != OK:
+        push_error("MCX_DIAG: Cannot load export presets: %d" % error)
+        quit(1)
+        return
+    var android_found := false
+    for section in config.get_sections():
+        if not section.begins_with("preset.") or section.ends_with(".options"):
+            continue
+        var platform := str(config.get_value(section, "platform", ""))
+        print("MCX_DIAG: Preset: ", config.get_value(section, "name", ""), " platform: ", platform)
+        if platform == "Android":
+            android_found = true
+            var options := section + ".options"
+            print("MCX_DIAG: Android version: ", config.get_value(options, "version/name", ""))
+            print("MCX_DIAG: Android package: ", config.get_value(options, "package/unique_name", ""))
+    if not android_found:
+        push_error("MCX_DIAG: Android preset is missing")
+    quit(0 if android_found else 1)

@@ -3,6 +3,8 @@ extends Control
 # MCX GAMES V0.0.9: generals decide victory, soldiers can damage generals, 99s rounds.
 # Visual and balance values are placeholders for Android prototype testing.
 const MAX_HP := 999
+const MAX_ATTRIBUTE := 255
+const MAX_MP := 999
 const ROUND_SECONDS := 99.0
 const REST_HEAL := 10.0
 const GENERAL_MAX_HP := 240.0
@@ -35,7 +37,7 @@ var soldiers_visual: Array[Dictionary] = []
 var battle_elapsed := 0.0
 var generals: Array[Dictionary] = []
 var round_count := 1
-var general_stats := [{"might": 80, "intellect": 65, "loyalty": 70, "mp": 80}, {"might": 75, "intellect": 70, "loyalty": 70, "mp": 90}]
+var general_stats := [{"might": 80, "intellect": 65, "loyalty": 70, "mp": 80, "max_mp": 80}, {"might": 75, "intellect": 70, "loyalty": 70, "mp": 90, "max_mp": 90}]
 # Prototype item stock: permanent attributes +1..10, loyalty jewels, and HP/MP elixirs +10..50.
 var inventory := {"attribute_pill": 2, "loyalty_jewel": 2, "hp_elixir": 2, "mp_elixir": 2}
 var item_info: Label
@@ -105,18 +107,28 @@ func _make_ui() -> void:
 func _use_item(item_key: String) -> void:
     if int(inventory.get(item_key, 0)) <= 0:
         return
-    inventory[item_key] = int(inventory[item_key]) - 1
     var stats: Dictionary = general_stats[0]
+    var changed := false
     match item_key:
         "attribute_pill":
-            stats["might"] = mini(999, int(stats["might"]) + 5) # Demo +5, legal item range +1..10.
+            var value := mini(MAX_ATTRIBUTE, int(stats["might"]) + 5) # Prototype +5; not final balance.
+            changed = value != int(stats["might"])
+            stats["might"] = value
         "loyalty_jewel":
-            stats["loyalty"] = mini(100, int(stats["loyalty"]) + 10)
+            var value := mini(100, int(stats["loyalty"]) + 10)
+            changed = value != int(stats["loyalty"])
+            stats["loyalty"] = value
         "hp_elixir":
-            if generals.size() > 0:
-                generals[0]["hp"] = minf(float(generals[0]["max_hp"]), float(generals[0]["hp"]) + 30.0)
+            if generals.size() > 0 and float(generals[0]["hp"]) > 0.0:
+                var value := minf(float(generals[0]["max_hp"]), float(generals[0]["hp"]) + 30.0)
+                changed = value != float(generals[0]["hp"])
+                generals[0]["hp"] = value
         "mp_elixir":
-            stats["mp"] = mini(999, int(stats["mp"]) + 30)
+            var value := mini(mini(MAX_MP, int(stats["max_mp"])), int(stats["mp"]) + 30)
+            changed = value != int(stats["mp"])
+            stats["mp"] = value
+    if changed:
+        inventory[item_key] = int(inventory[item_key]) - 1
     general_stats[0] = stats
     _refresh_item_info()
 
@@ -124,7 +136,7 @@ func _refresh_item_info() -> void:
     if item_info == null:
         return
     var s: Dictionary = general_stats[0]
-    item_info.text = "我軍武力 %d　智力 %d　忠誠 %d　技力 %d/999\n丹藥 %d　珠寶 %d　生命藥 %d　技力藥 %d" % [int(s["might"]), int(s["intellect"]), int(s["loyalty"]), int(s["mp"]), int(inventory["attribute_pill"]), int(inventory["loyalty_jewel"]), int(inventory["hp_elixir"]), int(inventory["mp_elixir"])]
+    item_info.text = "測試道具（數值暫定，未存檔）\n我軍武力 %d　智力 %d　忠誠 %d　技力 %d/%d\n丹藥 %d　珠寶 %d　生命藥 %d　技力藥 %d" % [int(s["might"]), int(s["intellect"]), int(s["loyalty"]), int(s["mp"]), int(s["max_mp"]), int(inventory["attribute_pill"]), int(inventory["loyalty_jewel"]), int(inventory["hp_elixir"]), int(inventory["mp_elixir"])]
 
 func _chinese_font() -> Font:
     var font := SystemFont.new()

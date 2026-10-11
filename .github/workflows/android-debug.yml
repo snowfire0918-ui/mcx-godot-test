@@ -3,7 +3,7 @@ name: Godot Android Debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, fix/android-export-signing-diagnostics, feature/battle-prototype-v0.0.2, feature/battle-prototype-v0.0.3, feature/battle-prototype-v0.0.4, feature/battle-prototype-v0.0.5, feature/battle-prototype-v0.0.6, feature/battle-prototype-v0.0.7, feature/battle-prototype-v0.0.8, feature/battle-prototype-v0.0.9]
+    branches: [main, fix/android-export-signing-diagnostics, feature/battle-prototype-v0.0.2, feature/battle-prototype-v0.0.3, feature/battle-prototype-v0.0.4, feature/battle-prototype-v0.0.5, feature/battle-prototype-v0.0.6, feature/battle-prototype-v0.0.7, feature/battle-prototype-v0.0.8, feature/battle-prototype-v0.0.9, feature/battle-prototype-v0.0.10]
 
 jobs:
   android-debug:
@@ -76,7 +76,16 @@ jobs:
           grep -E "export/android/(android_sdk_path|java_sdk_path|debug_keystore)" "$HOME/.config/godot/editor_settings-4.4.tres" | sed -E 's/(pass = ).*/\1[REDACTED]/'
           test -d "$SDK_DIR/platforms/android-35"
       - name: Import Godot project
-        run: godot --headless --editor --path . --import --quit
+        run: bash ci/run_checked.sh godot --headless --editor --path . --import --quit
+      - name: Verify scripts and battle rules
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/test_ci_guard.sh
+          bash ci/run_checked.sh godot --headless --path . --script ci/export_diagnostics.gd
+          for test_script in tests/test_*.gd; do
+            bash ci/run_checked.sh godot --headless --path . --script "$test_script"
+          done
       - name: Diagnose Android export configuration
         shell: bash
         run: |
@@ -137,7 +146,7 @@ jobs:
       - name: Export Android debug APK
         run: |
           mkdir -p build
-          godot --headless --verbose --path . --export-debug "Android" build/mcx-godot-test-debug.apk
+          bash ci/run_checked.sh godot --headless --verbose --path . --export-debug "Android" build/mcx-godot-test-debug.apk
           test -s build/mcx-godot-test-debug.apk
       - name: Upload APK
         uses: actions/upload-artifact@v4
