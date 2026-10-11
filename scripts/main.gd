@@ -145,7 +145,7 @@ func _process(delta: float) -> void:
     tick += dt
     battle_elapsed += dt
     # Cache living enemy indices once each frame; 200 actors are the hard cap.
-    var living: Array[Array] = [[], []]
+    var living: Array = [[], []]
     for i in range(soldiers_visual.size()):
         if float(soldiers_visual[i]["hp"]) > 0.0:
             living[int(soldiers_visual[i]["team"])].append(i)
