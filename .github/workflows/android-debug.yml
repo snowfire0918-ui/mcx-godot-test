@@ -112,6 +112,10 @@ jobs:
           echo "Debug signing preset configured"
           keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
           echo "Debug keystore alias verified"
+      - name: Godot-side export validation
+        shell: bash
+        run: |
+          godot --headless --editor --path . --script res://ci/export_diagnostics.gd
       - name: Export Android debug APK
         run: |
           mkdir -p build
