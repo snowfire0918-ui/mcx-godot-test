@@ -3,7 +3,7 @@ name: Godot Android Debug APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, fix/android-export-signing-diagnostics]
+    branches: [main, fix/android-export-signing-diagnostics, feature/battle-prototype-v0.0.2]
 
 jobs:
   android-debug:
