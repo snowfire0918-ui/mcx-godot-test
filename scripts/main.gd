@@ -1,6 +1,6 @@
 extends Control
 
-# MCX GAMES V0.0.3: generals, infantry, spears, archers.
+# MCX GAMES V0.0.4: troop counts, type advantages and battle losses.
 # Visual and balance values are placeholders for Android prototype testing.
 const MAX_HP := 100
 const FIELD_W := 620.0
@@ -18,6 +18,7 @@ var details: Label
 var units: Array[Dictionary] = []
 var active := false
 var tick := 0.0
+var starting_troops := [1000, 1000]
 
 func _ready() -> void:
     _make_ui()
@@ -41,7 +42,7 @@ func _make_ui() -> void:
     home = VBoxContainer.new()
     home.add_theme_constant_override("separation", 25)
     layout.add_child(home)
-    home.add_child(_label("PLAY · CREATE · KEEP THE DREAM\nGodot Android battle V0.0.3", 24))
+    home.add_child(_label("PLAY · CREATE · KEEP THE DREAM\nGodot Android battle V0.0.4", 24))
     var start := _button("START BATTLE TEST")
     start.pressed.connect(_show_battle)
     home.add_child(start)
@@ -104,8 +105,10 @@ func _restart() -> void:
         var base_x: float = 90.0 if team == 0 else 530.0
         for kind in range(4):
             var hp: int = 160 if kind == 3 else MAX_HP
+            var soldiers: int = 0 if kind == 3 else (400 if kind == 2 else 300)
             units.append({
                 "team": team, "kind": kind, "hp": hp, "max_hp": hp,
+                "soldiers": soldiers, "starting_soldiers": soldiers,
                 "x": base_x + (-35.0 if team == 0 else 35.0) * float(kind % 2),
                 "lane": kind, "cooldown": 0.0
             })
@@ -138,7 +141,17 @@ func _process(delta: float) -> void:
             unit["cooldown"] = float(unit["cooldown"]) - dt
             if float(unit["cooldown"]) <= 0.0:
                 var damage: int = 19 if kind == 3 else (16 if kind == 1 else (12 if kind == 2 else 14))
-                enemy["hp"] = maxi(0, int(enemy["hp"]) - damage)
+                var enemy_kind: int = int(enemy["kind"])
+                # Infantry > archers > spears > infantry; generals are neutral.
+                if (kind == 0 and enemy_kind == 2) or (kind == 2 and enemy_kind == 1) or (kind == 1 and enemy_kind == 0):
+                    damage = int(round(float(damage) * 1.5))
+                var previous_hp: int = int(enemy["hp"])
+                enemy["hp"] = maxi(0, previous_hp - damage)
+                if enemy_kind != 3:
+                    var lost: int = mini(int(enemy["soldiers"]), maxi(1, int(ceil(float(damage) * 0.55))))
+                    enemy["soldiers"] = maxi(0, int(enemy["soldiers"]) - lost)
+                    if int(enemy["soldiers"]) == 0:
+                        enemy["hp"] = 0
                 unit["cooldown"] = ATTACK_TIME * (1.3 if kind == 2 else 1.0)
                 units[target_index] = enemy
         units[i] = unit
@@ -148,7 +161,7 @@ func _process(delta: float) -> void:
     if a_alive == 0 or b_alive == 0:
         active = false
         status.text = "DRAW!" if a_alive == b_alive else ("ARMY A WINS!" if a_alive > 0 else "ARMY B WINS!")
-        details.text = "Battle finished. Tap RESTART to fight again."
+        details.text = "A survivors: %d  |  B survivors: %d\nTap RESTART to fight again." % [_total_soldiers(0), _total_soldiers(1)]
 
 func _nearest_enemy(index: int) -> int:
     var own: Dictionary = units[index]
@@ -171,6 +184,13 @@ func _alive_count(team: int) -> int:
             n += 1
     return n
 
+func _total_soldiers(team: int) -> int:
+    var n := 0
+    for u in units:
+        if int(u["team"]) == team and int(u["hp"]) > 0:
+            n += int(u["soldiers"])
+    return n
+
 func _total_hp(team: int) -> int:
     var n := 0
     for u in units:
@@ -179,9 +199,9 @@ func _total_hp(team: int) -> int:
     return n
 
 func _refresh() -> void:
-    score.text = "ARMY A  %d HP     VS     ARMY B  %d HP" % [_total_hp(0), _total_hp(1)]
+    score.text = "A %d / 1000 troops   VS   B %d / 1000" % [_total_soldiers(0), _total_soldiers(1)]
     if active:
-        details.text = "Infantry · Spears · Archers · General\nA: %d alive    B: %d alive" % [_alive_count(0), _alive_count(1)]
+        details.text = "Infantry > Archers > Spears > Infantry\nA losses: %d   B losses: %d" % [1000 - _total_soldiers(0), 1000 - _total_soldiers(1)]
     field.queue_redraw()
 
 func _draw_field() -> void:
