@@ -1,11 +1,14 @@
 extends Control
 
-# MCX GAMES V0.0.6: wider battlefield, independently moving visible soldiers.
+# MCX GAMES V0.0.7: 100 individually fighting soldiers per army.
 # Visual and balance values are placeholders for Android prototype testing.
 const MAX_HP := 100
 const FIELD_W := 920.0
 const SPEED := 90.0
-const MAX_VISIBLE_PER_GROUP := 12
+const MAX_VISIBLE_PER_ARMY := 100
+const SOLDIER_REACH := 15.0
+const SOLDIER_SPEED := 58.0
+const SOLDIER_ATTACK_INTERVAL := 0.75
 const FIELD_DISPLAY_H := 350.0
 const ATTACK_TIME := 0.8
 const UNIT_NAMES := ["INFANTRY", "SPEARS", "ARCHERS"]
@@ -22,6 +25,7 @@ var active := false
 var tick := 0.0
 var starting_troops := [1000, 1000]
 var soldiers_visual: Array[Dictionary] = []
+var battle_elapsed := 0.0
 
 func _ready() -> void:
     _make_ui()
@@ -45,7 +49,7 @@ func _make_ui() -> void:
     home = VBoxContainer.new()
     home.add_theme_constant_override("separation", 25)
     layout.add_child(home)
-    home.add_child(_label("PLAY · CREATE · KEEP THE DREAM\nGodot Android battle V0.0.6", 24))
+    home.add_child(_label("PLAY · CREATE · KEEP THE DREAM\nGodot Android battle V0.0.7", 24))
     var start := _button("START BATTLE TEST")
     start.pressed.connect(_show_battle)
     home.add_child(start)
@@ -104,131 +108,123 @@ func _show_battle() -> void:
 func _restart() -> void:
     units.clear()
     soldiers_visual.clear()
-    # Each side has one general and 3 distinct troop groups.
+    # One army has exactly 100 visual soldiers representing 1000 troops.
+    # The three groups are 30 infantry, 30 spears and 40 archers.
     for team in range(2):
         var base_x: float = 125.0 if team == 0 else 795.0
         for kind in range(4):
-            var hp: int = 160 if kind == 3 else MAX_HP
-            var soldiers: int = 0 if kind == 3 else (400 if kind == 2 else 300)
+            var count: int = 30 if kind < 2 else (40 if kind == 2 else 0)
+            var group_id: int = units.size()
             units.append({
-                "team": team, "kind": kind, "hp": hp, "max_hp": hp,
-                "soldiers": soldiers, "starting_soldiers": soldiers,
-                "x": base_x + (-35.0 if team == 0 else 35.0) * float(kind % 2),
-                "lane": kind, "cooldown": 0.0
+                "team": team, "kind": kind, "hp": 160 if kind == 3 else count * 10,
+                "max_hp": 160 if kind == 3 else count * 10,
+                "soldiers": count * 10, "starting_soldiers": count * 10,
+                "x": base_x, "lane": kind
             })
-            if kind != 3:
-                var group_id: int = units.size() - 1
-                for s in range(MAX_VISIBLE_PER_GROUP):
-                    soldiers_visual.append({"group": group_id, "x": base_x + (-30.0 if team == 0 else 30.0) * float(kind % 2) + float(s % 4) * (13.0 if team == 0 else -13.0), "y": 70.0 + float(kind) * 75.0 + float(s / 4) * 13.0 - 13.0, "seed": float(s) * 0.9})
+            for n in range(count):
+                var column: int = n % 8
+                var row: int = int(n / 8)
+                var direction: float = 1.0 if team == 0 else -1.0
+                soldiers_visual.append({
+                    "team": team, "group": group_id, "kind": kind,
+                    "x": base_x - direction * float(row) * 13.0 + direction * float(column) * 3.0,
+                    "y": 68.0 + float(kind) * 83.0 + float(column - 4) * 9.0,
+                    "hp": 10.0, "cooldown": float(n % 5) * 0.13,
+                    "attack_flash": 0.0
+                })
     active = true
     tick = 0.0
+    battle_elapsed = 0.0
     status.text = "BATTLE TEST"
     _refresh()
 
 func _process(delta: float) -> void:
     if not active:
         return
-    var dt: float = minf(delta, 0.1)
+    var dt: float = minf(delta, 0.08)
     tick += dt
-    for i in range(units.size()):
-        var unit: Dictionary = units[i]
-        if int(unit["hp"]) <= 0:
-            continue
-        var target_index: int = _nearest_enemy(i)
-        if target_index < 0:
-            continue
-        var enemy: Dictionary = units[target_index]
-        var distance: float = absf(float(enemy["x"]) - float(unit["x"]))
-        var kind: int = int(unit["kind"])
-        var reach: float = 205.0 if kind == 2 else (55.0 if kind == 3 else 38.0)
-        if distance > reach:
-            var direction: float = signf(float(enemy["x"]) - float(unit["x"]))
-            var pace: float = 0.65 if kind == 2 else (1.1 if kind == 3 else 1.0)
-            unit["x"] = clampf(float(unit["x"]) + direction * SPEED * pace * dt, 15.0, FIELD_W - 15.0)
-        else:
-            unit["cooldown"] = float(unit["cooldown"]) - dt
-            if float(unit["cooldown"]) <= 0.0:
-                var damage: int = 19 if kind == 3 else (16 if kind == 1 else (12 if kind == 2 else 14))
-                var enemy_kind: int = int(enemy["kind"])
-                # Infantry > archers > spears > infantry; generals are neutral.
-                if (kind == 0 and enemy_kind == 2) or (kind == 2 and enemy_kind == 1) or (kind == 1 and enemy_kind == 0):
-                    damage = int(round(float(damage) * 1.5))
-                var previous_hp: int = int(enemy["hp"])
-                enemy["hp"] = maxi(0, previous_hp - damage)
-                if enemy_kind != 3:
-                    var lost: int = mini(int(enemy["soldiers"]), maxi(1, int(ceil(float(damage) * 0.55))))
-                    enemy["soldiers"] = maxi(0, int(enemy["soldiers"]) - lost)
-                    if int(enemy["soldiers"]) == 0:
-                        enemy["hp"] = 0
-                unit["cooldown"] = ATTACK_TIME * (1.3 if kind == 2 else 1.0)
-                units[target_index] = enemy
-        units[i] = unit
-    _move_visible_soldiers(dt)
-    _refresh()
-    var a_alive := _alive_count(0)
-    var b_alive := _alive_count(1)
-    if a_alive == 0 or b_alive == 0:
-        active = false
-        status.text = "DRAW!" if a_alive == b_alive else ("ARMY A WINS!" if a_alive > 0 else "ARMY B WINS!")
-        details.text = "A survivors: %d  |  B survivors: %d\nTap RESTART to fight again." % [_total_soldiers(0), _total_soldiers(1)]
-
-func _move_visible_soldiers(dt: float) -> void:
-    # Visible soldiers move separately; casualties and damage remain group-simulated.
+    battle_elapsed += dt
+    # Cache living enemy indices once each frame; 200 actors are the hard cap.
+    var living: Array[Array] = [[], []]
     for i in range(soldiers_visual.size()):
-        var soldier: Dictionary = soldiers_visual[i]
-        var group: Dictionary = units[int(soldier["group"])]
-        if int(group["hp"]) <= 0:
-            continue
-        var team: int = int(group["team"])
-        var kind: int = int(group["kind"])
-        var target: float = float(group["x"]) + (float(i % 4) - 1.5) * 15.0
-        var target_y: float = 75.0 + float(kind) * 75.0 + (float(i % 3) - 1.0) * 13.0
-        if kind == 2:
-            target -= 35.0 if team == 0 else -35.0
-        var drift: float = sin(tick * 2.2 + float(soldier["seed"])) * 3.0
-        soldier["x"] = move_toward(float(soldier["x"]), target + drift, (SPEED * 0.85 + float(i % 5) * 5.0) * dt)
-        soldier["y"] = move_toward(float(soldier["y"]), target_y, 35.0 * dt)
-        soldiers_visual[i] = soldier
+        if float(soldiers_visual[i]["hp"]) > 0.0:
+            living[int(soldiers_visual[i]["team"])].append(i)
+    if living[0].is_empty() or living[1].is_empty():
+        active = false
+        status.text = "ARMY A WINS!" if not living[0].is_empty() else ("ARMY B WINS!" if not living[1].is_empty() else "DRAW!")
+        _recount_armies()
+        details.text = "A survivors: %d  |  B survivors: %d\nTap RESTART to fight again." % [_total_soldiers(0), _total_soldiers(1)]
+        field.queue_redraw()
+        return
+    # Each actor selects a nearby enemy, approaches or attacks independently.
+    for team in range(2):
+        var enemies: Array = living[1 - team]
+        for index in living[team]:
+            var s: Dictionary = soldiers_visual[index]
+            var nearest := -1
+            var best := INF
+            var sx: float = float(s["x"])
+            var sy: float = float(s["y"])
+            for enemy_index in enemies:
+                var e: Dictionary = soldiers_visual[enemy_index]
+                if float(e["hp"]) <= 0.0:
+                    continue
+                var dx: float = float(e["x"]) - sx
+                var dy: float = float(e["y"]) - sy
+                var distance_sq: float = dx * dx + dy * dy
+                if distance_sq < best:
+                    best = distance_sq
+                    nearest = enemy_index
+            if nearest < 0:
+                continue
+            var target: Dictionary = soldiers_visual[nearest]
+            var kind: int = int(s["kind"])
+            var reach: float = 125.0 if kind == 2 else SOLDIER_REACH
+            var dist: float = sqrt(best)
+            s["cooldown"] = maxf(0.0, float(s["cooldown"]) - dt)
+            s["attack_flash"] = maxf(0.0, float(s["attack_flash"]) - dt)
+            if dist > reach:
+                var move_dir: Vector2 = Vector2(float(target["x"]) - sx, float(target["y"]) - sy).normalized()
+                var speed: float = SOLDIER_SPEED * (0.7 if kind == 2 else 1.0)
+                s["x"] = clampf(sx + move_dir.x * speed * dt, 8.0, FIELD_W - 8.0)
+                s["y"] = clampf(sy + move_dir.y * speed * dt, 15.0, FIELD_DISPLAY_H - 20.0)
+            elif float(s["cooldown"]) <= 0.0:
+                var damage: float = 1.0
+                var enemy_kind: int = int(target["kind"])
+                if (kind == 0 and enemy_kind == 2) or (kind == 2 and enemy_kind == 1) or (kind == 1 and enemy_kind == 0):
+                    damage = 1.5
+                target["hp"] = maxf(0.0, float(target["hp"]) - damage)
+                soldiers_visual[nearest] = target
+                s["cooldown"] = SOLDIER_ATTACK_INTERVAL * (1.3 if kind == 2 else 1.0)
+                s["attack_flash"] = 0.15
+            soldiers_visual[index] = s
+    _recount_armies()
+    _refresh()
 
-func _nearest_enemy(index: int) -> int:
-    var own: Dictionary = units[index]
-    var closest := -1
-    var best := INF
-    for j in range(units.size()):
-        var other: Dictionary = units[j]
-        if int(other["team"]) == int(own["team"]) or int(other["hp"]) <= 0:
+func _recount_armies() -> void:
+    for i in range(units.size()):
+        if int(units[i]["kind"]) == 3:
             continue
-        var d: float = absf(float(other["x"]) - float(own["x"]))
-        if d < best:
-            best = d
-            closest = j
-    return closest
-
-func _alive_count(team: int) -> int:
-    var n := 0
-    for u in units:
-        if int(u["team"]) == team and int(u["hp"]) > 0:
-            n += 1
-    return n
+        var total_hp := 0.0
+        for s in soldiers_visual:
+            if int(s["group"]) == i:
+                total_hp += float(s["hp"])
+        var group: Dictionary = units[i]
+        group["soldiers"] = int(ceil(total_hp))
+        group["hp"] = int(ceil(total_hp))
+        units[i] = group
 
 func _total_soldiers(team: int) -> int:
-    var n := 0
-    for u in units:
-        if int(u["team"]) == team and int(u["hp"]) > 0:
-            n += int(u["soldiers"])
-    return n
-
-func _total_hp(team: int) -> int:
-    var n := 0
-    for u in units:
-        if int(u["team"]) == team:
-            n += int(u["hp"])
-    return n
+    var total := 0
+    for group in units:
+        if int(group["team"]) == team and int(group["kind"]) != 3:
+            total += int(group["soldiers"])
+    return total
 
 func _refresh() -> void:
     score.text = "A %d / 1000 troops   VS   B %d / 1000" % [_total_soldiers(0), _total_soldiers(1)]
     if active:
-        details.text = "Infantry > Archers > Spears > Infantry\nA losses: %d   B losses: %d" % [1000 - _total_soldiers(0), 1000 - _total_soldiers(1)]
+        details.text = "100 independent soldiers per army\nInfantry > Archers > Spears > Infantry\nA losses: %d   B losses: %d" % [1000 - _total_soldiers(0), 1000 - _total_soldiers(1)]
     field.queue_redraw()
 
 func _draw_field() -> void:
@@ -240,44 +236,24 @@ func _draw_field() -> void:
     field.draw_rect(Rect2(Vector2.ZERO, Vector2(w, h)), Color("#193c30"))
     for lane in range(4):
         var y: float = 75.0 + float(lane) * 75.0
-        field.draw_line(Vector2(0, y), Vector2(w, y), Color("#315746"), 1.0)
-    # Independent visual actors (simulation remains group-based for this prototype).
+        field.draw_line(Vector2(0.0, y), Vector2(w, y), Color("#315746"), 1.0)
     for s in soldiers_visual:
-        var u: Dictionary = units[int(s["group"])]
-        if int(u["hp"]) <= 0:
+        if float(s["hp"]) <= 0.0:
             continue
-        var starting: int = int(u["starting_soldiers"])
-        var current: int = int(u["soldiers"])
-        var allowed: int = mini(MAX_VISIBLE_PER_GROUP, int(ceil(float(current) * MAX_VISIBLE_PER_GROUP / float(starting))))
-        # Soldiers are appended only for non-general groups: use stable per-group index.
-        var group_slot: int = int(soldiers_visual.find(s))
-        var same_group_index: int = 0
-        for earlier in range(group_slot):
-            if int(soldiers_visual[earlier]["group"]) == int(s["group"]):
-                same_group_index += 1
-        if same_group_index >= allowed:
-            continue
-        var team: int = int(u["team"])
-        var kind: int = int(u["kind"])
-        var px: float = float(s["x"]) * scale_x
-        var py: float = float(s["y"])
-        var color: Color = COLORS[team]
-        field.draw_rect(Rect2(px - 4.0, py - 5.0, 8.0, 10.0), color)
-        field.draw_circle(Vector2(px, py - 8.0), 3.0, Color("#f1d6ae"))
+        var x: float = float(s["x"]) * scale_x
+        var y: float = float(s["y"])
+        var kind: int = int(s["kind"])
+        var team: int = int(s["team"])
+        var color: Color = Color.WHITE if float(s["attack_flash"]) > 0.0 else COLORS[team]
+        field.draw_rect(Rect2(x - 3.0, y - 4.0, 6.0, 9.0), color)
+        field.draw_circle(Vector2(x, y - 6.0), 2.5, Color("#f1d6ae"))
         if kind == 1:
-            field.draw_line(Vector2(px + 5.0, py - 12.0), Vector2(px + 5.0, py + 4.0), Color("#e8c36d"), 1.5)
+            field.draw_line(Vector2(x + 4.0, y - 10.0), Vector2(x + 4.0, y + 5.0), Color("#e8c36d"), 1.0)
         elif kind == 2:
-            field.draw_line(Vector2(px - 5.0, py - 9.0), Vector2(px + 5.0, py + 3.0), Color("#e9f4ff"), 1.5)
-    for u in units:
-        if int(u["hp"]) <= 0:
-            continue
-        var x: float = float(u["x"]) * scale_x
-        var kind: int = int(u["kind"])
-        var y: float = 75.0 + float(kind) * 75.0
-        if kind == 3:
-            var color: Color = COLORS[int(u["team"])]
-            field.draw_rect(Rect2(x - 12.0, y - 15.0, 24.0, 29.0), color)
-            field.draw_circle(Vector2(x, y - 20.0), 10.0, Color("#e8c36d"))
-        var ratio: float = float(u["hp"]) / float(u["max_hp"])
-        field.draw_rect(Rect2(x - 20.0, y + 27.0, 40.0, 4.0), Color("#3a2424"))
-        field.draw_rect(Rect2(x - 20.0, y + 27.0, 40.0 * ratio, 4.0), Color("#8cdd81"))
+            field.draw_line(Vector2(x - 4.0, y - 7.0), Vector2(x + 4.0, y + 4.0), Color("#e9f4ff"), 1.0)
+    # Generals are shown separately; their individual combat is a later milestone.
+    for team in range(2):
+        var general_x: float = (95.0 if team == 0 else 825.0) * scale_x
+        var general_y := 318.0
+        field.draw_rect(Rect2(general_x - 9.0, general_y - 15.0, 18.0, 23.0), COLORS[team])
+        field.draw_circle(Vector2(general_x, general_y - 19.0), 7.0, Color("#e8c36d"))
