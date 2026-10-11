@@ -1,6 +1,6 @@
 extends Control
 
-# MCX GAMES V0.0.7: 100 individually fighting soldiers per army.
+# MCX GAMES V0.0.8: automatic generals, formation spacing and troop reconciliation.
 # Visual and balance values are placeholders for Android prototype testing.
 const MAX_HP := 100
 const FIELD_W := 920.0
@@ -9,6 +9,9 @@ const MAX_VISIBLE_PER_ARMY := 100
 const SOLDIER_REACH := 15.0
 const SOLDIER_SPEED := 58.0
 const SOLDIER_ATTACK_INTERVAL := 0.75
+const GENERAL_SPEED := 44.0
+const GENERAL_REACH := 22.0
+const GENERAL_DAMAGE := 2.0
 const FIELD_DISPLAY_H := 350.0
 const ATTACK_TIME := 0.8
 const UNIT_NAMES := ["INFANTRY", "SPEARS", "ARCHERS"]
@@ -26,6 +29,7 @@ var tick := 0.0
 var starting_troops := [1000, 1000]
 var soldiers_visual: Array[Dictionary] = []
 var battle_elapsed := 0.0
+var generals: Array[Dictionary] = []
 
 func _ready() -> void:
     _make_ui()
@@ -49,7 +53,7 @@ func _make_ui() -> void:
     home = VBoxContainer.new()
     home.add_theme_constant_override("separation", 25)
     layout.add_child(home)
-    home.add_child(_label("PLAY · CREATE · KEEP THE DREAM\nGodot Android battle V0.0.7", 24))
+    home.add_child(_label("PLAY · CREATE · KEEP THE DREAM\nGodot Android battle V0.0.8", 24))
     var start := _button("START BATTLE TEST")
     start.pressed.connect(_show_battle)
     home.add_child(start)
@@ -108,10 +112,12 @@ func _show_battle() -> void:
 func _restart() -> void:
     units.clear()
     soldiers_visual.clear()
+    generals.clear()
     # One army has exactly 100 visual soldiers representing 1000 troops.
     # The three groups are 30 infantry, 30 spears and 40 archers.
     for team in range(2):
         var base_x: float = 125.0 if team == 0 else 795.0
+        generals.append({"team": team, "x": base_x, "y": 315.0, "hp": 160.0, "cooldown": 0.0})
         for kind in range(4):
             var count: int = 30 if kind < 2 else (40 if kind == 2 else 0)
             var group_id: int = units.size()
@@ -185,6 +191,16 @@ func _process(delta: float) -> void:
             s["attack_flash"] = maxf(0.0, float(s["attack_flash"]) - dt)
             if dist > reach:
                 var move_dir: Vector2 = Vector2(float(target["x"]) - sx, float(target["y"]) - sy).normalized()
+                # Small separation steering prevents every actor stacking on one pixel.
+                var repel := Vector2.ZERO
+                for ally_index in living[team]:
+                    if ally_index == index:
+                        continue
+                    var ally: Dictionary = soldiers_visual[ally_index]
+                    var away := Vector2(sx - float(ally["x"]), sy - float(ally["y"]))
+                    if away.length_squared() > 0.01 and away.length_squared() < 144.0:
+                        repel += away.normalized() * (12.0 - away.length()) / 12.0
+                move_dir = (move_dir + repel * 0.85).normalized()
                 var speed: float = SOLDIER_SPEED * (0.7 if kind == 2 else 1.0)
                 s["x"] = clampf(sx + move_dir.x * speed * dt, 8.0, FIELD_W - 8.0)
                 s["y"] = clampf(sy + move_dir.y * speed * dt, 15.0, FIELD_DISPLAY_H - 20.0)
@@ -198,8 +214,42 @@ func _process(delta: float) -> void:
                 s["cooldown"] = SOLDIER_ATTACK_INTERVAL * (1.3 if kind == 2 else 1.0)
                 s["attack_flash"] = 0.15
             soldiers_visual[index] = s
+    _move_generals(dt)
     _recount_armies()
     _refresh()
+
+func _move_generals(dt: float) -> void:
+    # Generals fight automatically in this milestone. Manual control comes later.
+    for gi in range(generals.size()):
+        var general: Dictionary = generals[gi]
+        if float(general["hp"]) <= 0.0:
+            continue
+        var nearest := -1
+        var best := INF
+        for si in range(soldiers_visual.size()):
+            var soldier: Dictionary = soldiers_visual[si]
+            if int(soldier["team"]) == int(general["team"]) or float(soldier["hp"]) <= 0.0:
+                continue
+            var dx: float = float(soldier["x"]) - float(general["x"])
+            var dy: float = float(soldier["y"]) - float(general["y"])
+            var distance_sq: float = dx * dx + dy * dy
+            if distance_sq < best:
+                best = distance_sq
+                nearest = si
+        if nearest < 0:
+            continue
+        var target: Dictionary = soldiers_visual[nearest]
+        var distance: float = sqrt(best)
+        general["cooldown"] = maxf(0.0, float(general["cooldown"]) - dt)
+        if distance > GENERAL_REACH:
+            var direction: Vector2 = Vector2(float(target["x"]) - float(general["x"]), float(target["y"]) - float(general["y"])).normalized()
+            general["x"] = clampf(float(general["x"]) + direction.x * GENERAL_SPEED * dt, 10.0, FIELD_W - 10.0)
+            general["y"] = clampf(float(general["y"]) + direction.y * GENERAL_SPEED * dt, 12.0, FIELD_DISPLAY_H - 12.0)
+        elif float(general["cooldown"]) <= 0.0:
+            target["hp"] = maxf(0.0, float(target["hp"]) - GENERAL_DAMAGE)
+            soldiers_visual[nearest] = target
+            general["cooldown"] = 0.65
+        generals[gi] = general
 
 func _recount_armies() -> void:
     for i in range(units.size()):
@@ -252,8 +302,11 @@ func _draw_field() -> void:
         elif kind == 2:
             field.draw_line(Vector2(x - 4.0, y - 7.0), Vector2(x + 4.0, y + 4.0), Color("#e9f4ff"), 1.0)
     # Generals are shown separately; their individual combat is a later milestone.
-    for team in range(2):
-        var general_x: float = (95.0 if team == 0 else 825.0) * scale_x
-        var general_y := 318.0
+    for general in generals:
+        if float(general["hp"]) <= 0.0:
+            continue
+        var team: int = int(general["team"])
+        var general_x: float = float(general["x"]) * scale_x
+        var general_y: float = float(general["y"])
         field.draw_rect(Rect2(general_x - 9.0, general_y - 15.0, 18.0, 23.0), COLORS[team])
         field.draw_circle(Vector2(general_x, general_y - 19.0), 7.0, Color("#e8c36d"))
