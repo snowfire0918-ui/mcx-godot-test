@@ -93,6 +93,31 @@ jobs:
           ls -l "$ANDROID_HOME/build-tools/35.0.0/aapt2" "$ANDROID_HOME/platforms/android-35/android.jar"
           echo "=== Export preset ==="
           grep -E '^(name|platform|package/unique_name|gradle_build/use_gradle_build)=' export_presets.cfg || true
+      - name: Configure explicit debug signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$HOME/.android/debug.keystore"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p = Path("export_presets.cfg")
+          content = p.read_text()
+          entries = {
+              'keystore/debug': os.path.join(os.environ["HOME"], ".android/debug.keystore"),
+              'keystore/debug_user': 'androiddebugkey',
+              'keystore/debug_password': 'android',
+          }
+          for key, value in entries.items():
+              old = f'{key}=""'
+              if old not in content:
+                  raise SystemExit(f"Expected blank preset entry missing: {key}")
+              content = content.replace(old, f'{key}="{value}"', 1)
+          p.write_text(content)
+          print("Debug keystore configured explicitly in export preset (password hidden)")
+          PY
+          keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
+          echo "Debug keystore alias verified"
       - name: Export Android debug APK
         run: |
           mkdir -p build
