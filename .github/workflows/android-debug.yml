@@ -98,24 +98,18 @@ jobs:
         run: |
           set -euo pipefail
           test -f "$HOME/.android/debug.keystore"
-          python3 - <<'PY'
-          from pathlib import Path
-          import os
-          p = Path("export_presets.cfg")
-          content = p.read_text()
-          entries = {
-              'keystore/debug': os.path.join(os.environ["HOME"], ".android/debug.keystore"),
-              'keystore/debug_user': 'androiddebugkey',
-              'keystore/debug_password': 'android',
-          }
-          for key, value in entries.items():
-              old = f'{key}=""'
-              if old not in content:
-                  raise SystemExit(f"Expected blank preset entry missing: {key}")
-              content = content.replace(old, f'{key}="{value}"', 1)
-          p.write_text(content)
-          print("Debug keystore configured explicitly in export preset (password hidden)")
-          PY
+          # Minimal Godot CI container does not include Python.
+          # Modify only the checked-in blank debug signing fields.
+          grep -qx 'keystore/debug=""' export_presets.cfg
+          grep -qx 'keystore/debug_user=""' export_presets.cfg
+          grep -qx 'keystore/debug_password=""' export_presets.cfg
+          sed -i \
+            -e "s|^keystore/debug=\"\"$|keystore/debug=\"$HOME/.android/debug.keystore\"|" \
+            -e 's|^keystore/debug_user=""$|keystore/debug_user="androiddebugkey"|' \
+            -e 's|^keystore/debug_password=""$|keystore/debug_password="android"|' \
+            export_presets.cfg
+          grep -q "^keystore/debug=\"$HOME/.android/debug.keystore\"$" export_presets.cfg
+          echo "Debug signing preset configured"
           keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
           echo "Debug keystore alias verified"
       - name: Export Android debug APK
