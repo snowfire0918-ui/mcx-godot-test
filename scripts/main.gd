@@ -205,7 +205,7 @@ func _process(delta: float) -> void:
     if battle_elapsed >= ROUND_SECONDS:
         active = false
         status.text = "99秒到！雙方撤退"
-        details.text = "Round %d ended. HP and surviving troops retained.\n重新開始 begins a new test." % round_count
+        details.text = "第 %d 回合結束，保留生命與剩餘兵力。\n點擊「重新開始」可重新測試。" % round_count
         field.queue_redraw()
         return
     # Each actor selects a nearby enemy, approaches or attacks independently.
@@ -292,7 +292,7 @@ func _end_battle() -> void:
         status.text = "我軍勝利！敵方武將全滅"
     else:
         status.text = "敵軍勝利！我方武將全滅"
-    details.text = "A troops: %d | B troops: %d\nVictory is decided by generals, not soldiers." % [_total_soldiers(0), _total_soldiers(1)]
+    details.text = "我軍兵力：%d｜敵軍兵力：%d\n武將全滅才算戰敗。" % [_total_soldiers(0), _total_soldiers(1)]
     field.queue_redraw()
 
 func _move_generals(dt: float) -> void:
@@ -360,9 +360,9 @@ func _total_soldiers(team: int) -> int:
     return total
 
 func _refresh() -> void:
-    score.text = "A %d troops / %d HP  VS  B %d troops / %d HP" % [_total_soldiers(0), int(generals[0]["hp"]), _total_soldiers(1), int(generals[1]["hp"])]
+    score.text = "我軍 %d 兵／%d 生命 VS 敵軍 %d 兵／%d 生命" % [_total_soldiers(0), int(generals[0]["hp"]), _total_soldiers(1), int(generals[1]["hp"])]
     if active:
-        details.text = "Time: %ds / 99s | Generals decide victory\nSoldiers can damage generals | A losses: %d B losses: %d" % [int(battle_elapsed), 1000 - _total_soldiers(0), 1000 - _total_soldiers(1)]
+        details.text = "時間：%d／99秒｜武將全滅判敗\n我軍損失：%d　敵軍損失：%d" % [int(battle_elapsed), 1000 - _total_soldiers(0), 1000 - _total_soldiers(1)]
     field.queue_redraw()
 
 func _draw_field() -> void:
