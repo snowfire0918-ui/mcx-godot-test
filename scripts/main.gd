@@ -1,10 +1,11 @@
 extends Control
 
-# MCX GAMES V0.0.4: troop counts, type advantages and battle losses.
+# MCX GAMES V0.0.5: mobile-friendly multi-soldier formations.
 # Visual and balance values are placeholders for Android prototype testing.
 const MAX_HP := 100
 const FIELD_W := 620.0
 const SPEED := 65.0
+const MAX_VISIBLE_PER_GROUP := 12
 const ATTACK_TIME := 0.8
 const UNIT_NAMES := ["INFANTRY", "SPEARS", "ARCHERS"]
 const COLORS := [Color("#5ba6e6"), Color("#e46d67")]
@@ -42,7 +43,7 @@ func _make_ui() -> void:
     home = VBoxContainer.new()
     home.add_theme_constant_override("separation", 25)
     layout.add_child(home)
-    home.add_child(_label("PLAY · CREATE · KEEP THE DREAM\nGodot Android battle V0.0.4", 24))
+    home.add_child(_label("PLAY · CREATE · KEEP THE DREAM\nGodot Android battle V0.0.5", 24))
     var start := _button("START BATTLE TEST")
     start.pressed.connect(_show_battle)
     home.add_child(start)
@@ -222,14 +223,30 @@ func _draw_field() -> void:
         var kind: int = int(u["kind"])
         var team: int = int(u["team"])
         var color: Color = COLORS[team]
-        var size: float = 25.0 if kind == 3 else 19.0
-        field.draw_rect(Rect2(x - size / 2.0, y - size / 2.0, size, size), color)
         if kind == 3:
-            field.draw_circle(Vector2(x, y - 17.0), 10.0, Color("#e8c36d"))
-        elif kind == 2:
-            field.draw_line(Vector2(x - 9.0, y - 12.0), Vector2(x + 10.0, y + 12.0), Color.WHITE, 2.0)
-        elif kind == 1:
-            field.draw_line(Vector2(x, y - 21.0), Vector2(x, y + 5.0), Color("#e8c36d"), 3.0)
+            # General is distinct from the troop formation.
+            field.draw_rect(Rect2(x - 12.0, y - 15.0, 24.0, 29.0), color)
+            field.draw_circle(Vector2(x, y - 20.0), 10.0, Color("#e8c36d"))
+        else:
+            # A formation renders up to 12 individuals per troop group.
+            # Underlying battle simulation still operates at group level.
+            var starting: int = int(u["starting_soldiers"])
+            var current: int = int(u["soldiers"])
+            var visible: int = mini(MAX_VISIBLE_PER_GROUP, int(ceil(float(current) * float(MAX_VISIBLE_PER_GROUP) / float(starting))))
+            for i in range(visible):
+                var col: int = i % 4
+                var row: int = i / 4
+                var side: float = 1.0 if team == 0 else -1.0
+                var phase: float = float(i) * 1.7 + float(team) * 0.8
+                var step: float = sin(tick * 7.0 + phase) * 2.0 if active else 0.0
+                var px: float = x - side * (float(col) * 12.0 + 3.0) + step
+                var py: float = y + (float(row) - 1.0) * 13.0
+                field.draw_rect(Rect2(px - 4.0, py - 5.0, 8.0, 10.0), color)
+                field.draw_circle(Vector2(px, py - 8.0), 3.0, Color("#f1d6ae"))
+                if kind == 1:
+                    field.draw_line(Vector2(px + side * 5.0, py - 12.0), Vector2(px + side * 5.0, py + 4.0), Color("#e8c36d"), 1.5)
+                elif kind == 2:
+                    field.draw_line(Vector2(px - 5.0, py - 9.0), Vector2(px + 5.0, py + 3.0), Color("#e9f4ff"), 1.5)
         var ratio: float = float(u["hp"]) / float(u["max_hp"])
-        field.draw_rect(Rect2(x - 15.0, y + 17.0, 30.0, 4.0), Color("#3a2424"))
-        field.draw_rect(Rect2(x - 15.0, y + 17.0, 30.0 * ratio, 4.0), Color("#8cdd81"))
+        field.draw_rect(Rect2(x - 20.0, y + 24.0, 40.0, 4.0), Color("#3a2424"))
+        field.draw_rect(Rect2(x - 20.0, y + 24.0, 40.0 * ratio, 4.0), Color("#8cdd81"))
