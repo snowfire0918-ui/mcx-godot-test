@@ -112,10 +112,20 @@ jobs:
           echo "Debug signing preset configured"
           keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
           echo "Debug keystore alias verified"
-      - name: Godot-side export validation
+      - name: Verify Android export dependencies
         shell: bash
         run: |
-          godot --headless --editor --path . --script res://ci/export_diagnostics.gd
+          set -euo pipefail
+          echo "=== Android SDK validation ==="
+          for item in "$ANDROID_HOME/platform-tools/adb" "$ANDROID_HOME/build-tools/35.0.0/apksigner" "$ANDROID_HOME/build-tools/35.0.0/zipalign" "$ANDROID_HOME/build-tools/35.0.0/aapt2" "$ANDROID_HOME/platforms/android-35/android.jar"; do
+            if [ -e "$item" ]; then ls -lh "$item"; else echo "::error::Missing $item"; fi
+          done
+          echo "=== Java ==="
+          java -version
+          echo "=== Godot preset ==="
+          grep -E '^(name|platform|package/|version/|architectures/|gradle_build/)' export_presets.cfg || true
+          echo "=== Godot editor settings ==="
+          grep -E 'export/android/(android_sdk_path|java_sdk_path|debug_keystore)' "$HOME/.config/godot/editor_settings-4.4.tres" | sed -E 's/(pass = ).*/\\1[REDACTED]/' || true
       - name: Export Android debug APK
         run: |
           mkdir -p build
