@@ -79,13 +79,7 @@ jobs:
         run: bash ci/run_checked.sh godot --headless --editor --path . --import --quit
       - name: Verify scripts and battle rules
         shell: bash
-        run: |
-          set -euo pipefail
-          bash tests/test_ci_guard.sh
-          bash ci/run_checked.sh godot --headless --path . --script ci/export_diagnostics.gd
-          for test_script in tests/test_*.gd; do
-            bash ci/run_checked.sh godot --headless --path . --script "$test_script"
-          done
+        run: bash ci/test.sh
       - name: Diagnose Android export configuration
         shell: bash
         run: |
@@ -153,4 +147,20 @@ jobs:
         with:
           name: mcx-godot-test-debug
           path: build/mcx-godot-test-debug.apk
+          if-no-files-found: error
+      - name: Capture desktop layout previews
+        shell: bash
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y --no-install-recommends xvfb xauth fonts-noto-cjk libgl1-mesa-dri
+          bash ci/run_checked.sh xvfb-run -a -s "-screen 0 1000x1600x24" godot --rendering-method gl_compatibility --audio-driver Dummy --path . --script ci/capture_preview.gd
+          test -s build/qa/selection.png
+      - name: Upload desktop previews
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcx-desktop-preview
+          path: build/qa/*.png
           if-no-files-found: error

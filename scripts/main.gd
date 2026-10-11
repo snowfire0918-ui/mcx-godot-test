@@ -1,16 +1,14 @@
 extends Control
 
-# MCX GAMES V0.0.9: generals decide victory, soldiers can damage generals, 99s rounds.
-# Visual and balance values are placeholders for Android prototype testing.
+# V0.0.10 implements the approved V1.2 P1 rules. Art / damage / rosters are prototypes.
+const Campaign = preload("res://scripts/battle_campaign.gd")
+const PrototypeRoster = preload("res://scripts/prototype_roster.gd")
 const MAX_HP := 999
 const MAX_ATTRIBUTE := 255
 const MAX_MP := 999
 const ROUND_SECONDS := 99.0
-const REST_HEAL := 10.0
-const GENERAL_MAX_HP := 240.0
 const GENERAL_ATTACK_INTERVAL := 0.65
 const FIELD_W := 920.0
-const SPEED := 90.0
 const MAX_VISIBLE_PER_ARMY := 100
 const SOLDIER_REACH := 15.0
 const SOLDIER_SPEED := 58.0
@@ -19,92 +17,324 @@ const GENERAL_SPEED := 44.0
 const GENERAL_REACH := 22.0
 const GENERAL_DAMAGE := 2.0
 const FIELD_DISPLAY_H := 350.0
-const ATTACK_TIME := 0.8
-const UNIT_NAMES := ["INFANTRY", "SPEARS", "ARCHERS"]
 const COLORS := [Color("#5ba6e6"), Color("#e46d67")]
+const ITEM_NAMES := {"attribute_pill": "武力丹", "loyalty_jewel": "忠誠珠寶", "hp_elixir": "生命靈藥", "mp_elixir": "技力靈藥"}
 
+var campaign = Campaign.new()
+var campaign_started := false
 var home: VBoxContainer
+var selection: VBoxContainer
 var battle: VBoxContainer
+var layout: VBoxContainer
+var scroll: ScrollContainer
 var field: Control
 var status: Label
 var score: Label
 var details: Label
+var general_info: Label
+var selection_info: Label
+var squad_pickers: Array[OptionButton] = []
+var squad_details: Array[Label] = []
+var deploy_button: Button
+var next_round_button: Button
+var resume_button: Button
+var reset_dialog: ConfirmationDialog
+var attacker_count: SpinBox
+var defender_count: SpinBox
+var general_count: SpinBox
+var ui_font: Font
 var units: Array[Dictionary] = []
 var active := false
-var tick := 0.0
-var starting_troops := [1000, 1000]
+var starting_troops := [0, 0]
 var soldiers_visual: Array[Dictionary] = []
 var battle_elapsed := 0.0
 var generals: Array[Dictionary] = []
-var round_count := 1
 var general_stats := [{"might": 80, "intellect": 65, "loyalty": 70, "mp": 80, "max_mp": 80}, {"might": 75, "intellect": 70, "loyalty": 70, "mp": 90, "max_mp": 90}]
-# Prototype item stock: permanent attributes +1..10, loyalty jewels, and HP/MP elixirs +10..50.
 var inventory := {"attribute_pill": 2, "loyalty_jewel": 2, "hp_elixir": 2, "mp_elixir": 2}
 var item_info: Label
-const ITEM_NAMES := {"attribute_pill": "屬性丹藥", "loyalty_jewel": "忠誠珠寶", "hp_elixir": "生命靈藥", "mp_elixir": "技力靈藥"}
+var item_buttons: Array[Button] = []
 
 func _ready() -> void:
     _make_ui()
     _show_home()
 
 func _make_ui() -> void:
+    ui_font = _chinese_font()
+    theme = Theme.new()
+    theme.default_font = ui_font
+    theme.default_font_size = 22
     var bg := ColorRect.new()
     bg.color = Color("#102b25")
+    bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
     bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
     add_child(bg)
-    var center := CenterContainer.new()
-    center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-    add_child(center)
-    var layout := VBoxContainer.new()
-    layout.custom_minimum_size = Vector2(620, 0)
-    layout.add_theme_constant_override("separation", 18)
-    center.add_child(layout)
-    var brand := _label("MCX GAMES", 44)
+    var margin := MarginContainer.new()
+    margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    for edge in ["left", "right", "top", "bottom"]:
+        margin.add_theme_constant_override("margin_" + edge, 20)
+    add_child(margin)
+    scroll = ScrollContainer.new()
+    scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    margin.add_child(scroll)
+    layout = VBoxContainer.new()
+    layout.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    layout.add_theme_constant_override("separation", 16)
+    scroll.add_child(layout)
+    var brand := _label("MCX GAMES", 34)
     brand.add_theme_color_override("font_color", Color("#e8c36d"))
     layout.add_child(brand)
-    home = VBoxContainer.new()
-    home.add_theme_constant_override("separation", 25)
-    layout.add_child(home)
-    home.add_child(_label("PLAY · CREATE · KEEP THE DREAM\n安卓戰鬥測試 V0.0.9", 24))
-    var start := _button("開始戰鬥")
-    start.pressed.connect(_show_battle)
+    layout.add_child(_label("三國：我的三國我做主\n第一代豪華重製版 · 測試 V0.0.10", 22))
+    home = _column(layout)
+    home.add_child(_label("戰役設定（原型參數）", 26))
+    attacker_count = _count_input(home, "我軍進攻隊伍", 1, 5, 3)
+    defender_count = _count_input(home, "敵軍防守隊伍", 1, 10, 3)
+    general_count = _count_input(home, "每隊武將人數", 1, 3, 3)
+    home.add_child(_label("每隊1主將、0～2副將；每場各選1隊。\n99秒撤回保留生命與兵力。休整一場+10生命，陣亡者不復活。", 19))
+    var start := _button("建立新測試戰役")
+    start.pressed.connect(_request_new_campaign)
     home.add_child(start)
-    battle = VBoxContainer.new()
-    battle.add_theme_constant_override("separation", 14)
-    layout.add_child(battle)
-    status = _label("戰鬥測試", 32)
-    status.add_theme_color_override("font_color", Color("#e8c36d"))
-    battle.add_child(status)
-    score = _label("我軍 VS 敵軍", 24)
-    battle.add_child(score)
-    field = Control.new()
-    field.custom_minimum_size = Vector2(620, FIELD_DISPLAY_H)
-    field.draw.connect(_draw_field)
-    battle.add_child(field)
-    details = _label("", 21)
-    battle.add_child(details)
-    var buttons := HBoxContainer.new()
-    buttons.add_theme_constant_override("separation", 12)
-    battle.add_child(buttons)
-    var restart := _button("重新開始")
-    restart.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    restart.pressed.connect(_restart)
-    buttons.add_child(restart)
-    var back := _button("返回")
-    back.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    back.pressed.connect(_show_home)
-    buttons.add_child(back)
-    battle.visible = false
+    resume_button = _button("繼續戰役")
+    resume_button.pressed.connect(_resume_campaign)
+    home.add_child(resume_button)
+    home.add_child(_label("此版只在本次開啟期間保留戰役。\n關閉程式後尚無永久存檔。", 18))
     item_info = _label("", 18)
     home.add_child(item_info)
-    for item_key in ["attribute_pill", "loyalty_jewel", "hp_elixir", "mp_elixir"]:
-        var item_button := _button("使用「" + ITEM_NAMES[item_key] + "」")
-        item_button.custom_minimum_size.y = 48.0
-        item_button.pressed.connect(_use_item.bind(item_key))
-        home.add_child(item_button)
+    for key in ITEM_NAMES:
+        var button := _button("測試使用：" + ITEM_NAMES[key])
+        button.pressed.connect(_use_item.bind(key))
+        item_buttons.append(button)
+        home.add_child(button)
+    reset_dialog = ConfirmationDialog.new()
+    reset_dialog.title = "建立新測試戰役"
+    reset_dialog.dialog_text = "將清空目前的戰役傷勢、兵力與測試道具。確定重新建立？"
+    reset_dialog.ok_button_text = "確定重建"
+    reset_dialog.cancel_button_text = "保留戰役"
+    reset_dialog.confirmed.connect(_new_campaign)
+    add_child(reset_dialog)
+    selection = _column(layout)
+    selection_info = _label("選隊出戰", 24)
+    selection.add_child(selection_info)
+    for side in range(2):
+        selection.add_child(_label("我軍進攻隊伍" if side == 0 else "敵軍防守隊伍（測試選隊）", 22))
+        var picker := OptionButton.new()
+        picker.custom_minimum_size.y = 64
+        picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+        picker.fit_to_longest_item = false
+        picker.get_popup().theme = theme
+        picker.item_selected.connect(_selection_changed.bind(side))
+        squad_pickers.append(picker)
+        selection.add_child(picker)
+        var info := _label("", 20)
+        squad_details.append(info)
+        selection.add_child(info)
+    selection.add_child(_label("未出場的隊伍在本場結束後休整。\n勝隊可以再戰，也可換隊。", 18))
+    deploy_button = _button("選定隊伍 · 出戰")
+    deploy_button.pressed.connect(_start_selected_round)
+    selection.add_child(deploy_button)
+    var select_back := _button("返回首頁")
+    select_back.pressed.connect(_show_home)
+    selection.add_child(select_back)
+    battle = _column(layout)
+    status = _label("戰鬥測試", 26)
+    status.add_theme_color_override("font_color", Color("#e8c36d"))
+    battle.add_child(status)
+    score = _label("", 22)
+    battle.add_child(score)
+    field = Control.new()
+    field.custom_minimum_size = Vector2(0, FIELD_DISPLAY_H)
+    field.draw.connect(_draw_field)
+    battle.add_child(field)
+    general_info = _label("", 18)
+    battle.add_child(general_info)
+    details = _label("", 20)
+    battle.add_child(details)
+    next_round_button = _button("重新選隊")
+    next_round_button.pressed.connect(_show_selection)
+    battle.add_child(next_round_button)
+    var pause := _button("暫停／返回首頁")
+    pause.pressed.connect(_show_home)
+    battle.add_child(pause)
     _refresh_item_info()
 
+func _column(parent: Node) -> VBoxContainer:
+    var column := VBoxContainer.new()
+    column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    column.add_theme_constant_override("separation", 12)
+    parent.add_child(column)
+    return column
+
+func _count_input(parent: Node, caption: String, minimum: int, maximum: int, value: int) -> SpinBox:
+    var row := HBoxContainer.new()
+    row.add_theme_constant_override("separation", 12)
+    parent.add_child(row)
+    var label := _label(caption + "（%d～%d）" % [minimum, maximum], 20)
+    label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    row.add_child(label)
+    var count := SpinBox.new()
+    count.min_value = minimum
+    count.max_value = maximum
+    count.step = 1
+    count.value = value
+    count.custom_minimum_size = Vector2(110, 56)
+    row.add_child(count)
+    return count
+
+func _chinese_font() -> Font:
+    var font := SystemFont.new()
+    font.font_names = PackedStringArray(["Noto Sans CJK TC", "Noto Sans CJK SC", "Noto Sans", "sans-serif"])
+    font.allow_system_fallback = true
+    return font
+
+func _label(value: String, font_size: int) -> Label:
+    var label := Label.new()
+    label.text = value
+    label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    label.add_theme_font_size_override("font_size", font_size)
+    label.add_theme_color_override("font_color", Color.WHITE)
+    return label
+
+func _button(value: String) -> Button:
+    var button := Button.new()
+    button.text = value
+    button.custom_minimum_size = Vector2(0, 64)
+    return button
+
+func _request_new_campaign() -> void:
+    if campaign_started:
+        reset_dialog.popup_centered(Vector2i(mini(560, int(size.x) - 24), 220))
+    else:
+        _new_campaign()
+
+func _new_campaign() -> void:
+    var roster: Array = PrototypeRoster.build(int(attacker_count.value), int(defender_count.value), int(general_count.value))
+    var error := campaign.configure(roster[0], roster[1])
+    if not error.is_empty():
+        item_info.text = error
+        return
+    campaign_started = true
+    active = false
+    generals.clear()
+    soldiers_visual.clear()
+    units.clear()
+    general_stats = [campaign.armies[0][0]["generals"][0], campaign.armies[1][0]["generals"][0]]
+    inventory = {"attribute_pill": 2, "loyalty_jewel": 2, "hp_elixir": 2, "mp_elixir": 2}
+    _show_selection()
+
+func _show_home() -> void:
+    active = false
+    home.visible = true
+    selection.visible = false
+    battle.visible = false
+    resume_button.visible = campaign_started
+    for button in item_buttons:
+        button.visible = campaign_started
+        button.disabled = campaign.phase == "fighting"
+    _refresh_item_info()
+    scroll.scroll_vertical = 0
+
+func _resume_campaign() -> void:
+    if not campaign_started:
+        return
+    if campaign.phase == "selection":
+        _show_selection()
+    else:
+        home.visible = false
+        selection.visible = false
+        battle.visible = true
+        active = campaign.phase == "fighting"
+        scroll.scroll_vertical = 0
+        field.queue_redraw()
+
+func _show_selection() -> void:
+    if not campaign_started or campaign.phase == "fighting":
+        return
+    active = false
+    home.visible = false
+    battle.visible = false
+    selection.visible = true
+    var result := campaign.campaign_result()
+    selection_info.text = "第%d場 · 選隊出戰" % (campaign.round_number + 1)
+    if not result.is_empty():
+        selection_info.text = "戰役結束 · " + _result_text(result)
+    elif not campaign.last_result.is_empty():
+        selection_info.text += "\n上一場：" + _result_text(campaign.last_result)
+    for side in range(2):
+        var picker := squad_pickers[side]
+        var preferred: int = campaign.selected[side]
+        picker.clear()
+        for index in range(campaign.armies[side].size()):
+            var squad: Dictionary = campaign.armies[side][index]
+            var alive := campaign.squad_alive(squad)
+            picker.add_item("%s · %d兵 · %s" % [squad["name"], campaign.troops(squad), "可出戰" if alive else "全將陣亡"])
+            picker.set_item_disabled(index, not alive)
+        if preferred < 0 or preferred >= picker.item_count or picker.is_item_disabled(preferred):
+            preferred = -1
+            for index in range(picker.item_count):
+                if not picker.is_item_disabled(index):
+                    preferred = index
+                    break
+        picker.select(preferred)
+        _selection_changed(preferred, side)
+    deploy_button.disabled = not result.is_empty()
+    scroll.scroll_vertical = 0
+
+func _selection_changed(index: int, side: int) -> void:
+    if index < 0:
+        squad_details[side].text = "沒有可出戰隊伍"
+        return
+    var squad: Dictionary = campaign.armies[side][index]
+    var lines: Array[String] = []
+    for slot in range(squad["generals"].size()):
+        var g: Dictionary = squad["generals"][slot]
+        lines.append("%s · 生命 %.1f／%.0f%s" % [g["name"], g["hp"], g["max_hp"], "（陣亡）" if float(g["hp"]) <= 0.0 else ""])
+    squad_details[side].text = "\n".join(lines)
+
+func _start_selected_round() -> void:
+    if not campaign.begin_round(squad_pickers[0].selected, squad_pickers[1].selected):
+        return
+    units.clear()
+    soldiers_visual.clear()
+    generals.clear()
+    for side in range(2):
+        var squad: Dictionary = campaign.armies[side][campaign.selected[side]]
+        starting_troops[side] = campaign.troops(squad)
+        var base_x: float = 125.0 if side == 0 else 795.0
+        for slot in range(squad["generals"].size()):
+            var g: Dictionary = squad["generals"][slot]
+            g.merge({"team": side, "slot": slot, "x": base_x, "y": 275.0 + float(slot) * 22.0, "cooldown": 0.0}, true)
+            generals.append(g)
+        for kind in range(3):
+            var group_id := units.size()
+            units.append({"team": side, "kind": kind, "soldiers": 0, "hp": 0})
+            var n := 0
+            for s in squad["soldiers"]:
+                if int(s["kind"]) != kind:
+                    continue
+                var column: int = n % 8
+                var row: int = int(n / 8)
+                var direction: float = 1.0 if side == 0 else -1.0
+                s.merge({"team": side, "group": group_id,
+                    "x": base_x - direction * float(row) * 13.0 + direction * float(column) * 3.0,
+                    "y": 68.0 + float(kind) * 83.0 + float(column - 4) * 9.0,
+                    "cooldown": float(n % 5) * 0.13, "attack_flash": 0.0}, true)
+                soldiers_visual.append(s)
+                n += 1
+    active = true
+    battle_elapsed = 0.0
+    home.visible = false
+    selection.visible = false
+    battle.visible = true
+    status.text = "第%d場 · 自動交戰" % campaign.round_number
+    next_round_button.visible = false
+    scroll.scroll_vertical = 0
+    _recount_armies()
+    _refresh()
+
 func _use_item(item_key: String) -> void:
+    if campaign_started and campaign.phase == "fighting":
+        return
     if int(inventory.get(item_key, 0)) <= 0:
         return
     var stats: Dictionary = general_stats[0]
@@ -119,10 +349,10 @@ func _use_item(item_key: String) -> void:
             changed = value != int(stats["loyalty"])
             stats["loyalty"] = value
         "hp_elixir":
-            if generals.size() > 0 and float(generals[0]["hp"]) > 0.0:
-                var value := minf(float(generals[0]["max_hp"]), float(generals[0]["hp"]) + 30.0)
-                changed = value != float(generals[0]["hp"])
-                generals[0]["hp"] = value
+            if stats.has("hp") and float(stats["hp"]) > 0.0:
+                var value := minf(float(stats["max_hp"]), float(stats["hp"]) + 30.0)
+                changed = value != float(stats["hp"])
+                stats["hp"] = value
         "mp_elixir":
             var value := mini(mini(MAX_MP, int(stats["max_mp"])), int(stats["mp"]) + 30)
             changed = value != int(stats["mp"])
@@ -132,106 +362,26 @@ func _use_item(item_key: String) -> void:
     general_stats[0] = stats
     _refresh_item_info()
 
-func _refresh_item_info() -> void:
-    if item_info == null:
-        return
-    var s: Dictionary = general_stats[0]
-    item_info.text = "測試道具（數值暫定，未存檔）\n我軍武力 %d　智力 %d　忠誠 %d　技力 %d/%d\n丹藥 %d　珠寶 %d　生命藥 %d　技力藥 %d" % [int(s["might"]), int(s["intellect"]), int(s["loyalty"]), int(s["mp"]), int(s["max_mp"]), int(inventory["attribute_pill"]), int(inventory["loyalty_jewel"]), int(inventory["hp_elixir"]), int(inventory["mp_elixir"])]
-
-func _chinese_font() -> Font:
-    var font := SystemFont.new()
-    font.font_names = PackedStringArray(["Noto Sans CJK SC", "Noto Sans CJK TC", "Noto Sans", "sans-serif"])
-    return font
-
-func _label(value: String, font_size: int) -> Label:
-    var l := Label.new()
-    l.text = value
-    l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-    l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    l.add_theme_font_override("font", _chinese_font())
-    l.add_theme_font_size_override("font_size", font_size)
-    l.add_theme_color_override("font_color", Color.WHITE)
-    return l
-
-func _button(value: String) -> Button:
-    var b := Button.new()
-    b.text = value
-    b.add_theme_font_override("font", _chinese_font())
-    b.custom_minimum_size = Vector2(0, 90)
-    return b
-
-func _show_home() -> void:
-    active = false
-    home.visible = true
-    battle.visible = false
-    _refresh_item_info()
-
-func _show_battle() -> void:
-    home.visible = false
-    battle.visible = true
-    _restart()
-
-func _restart() -> void:
-    units.clear()
-    soldiers_visual.clear()
-    generals.clear()
-    round_count = 1
-    # One army has exactly 100 visual soldiers representing 1000 troops.
-    # The three groups are 30 infantry, 30 spears and 40 archers.
-    for team in range(2):
-        var base_x: float = 125.0 if team == 0 else 795.0
-        generals.append({"team": team, "x": base_x, "y": 315.0, "hp": GENERAL_MAX_HP, "max_hp": GENERAL_MAX_HP, "cooldown": 0.0})
-        for kind in range(4):
-            var count: int = 30 if kind < 2 else (40 if kind == 2 else 0)
-            var group_id: int = units.size()
-            units.append({
-                "team": team, "kind": kind, "hp": 160 if kind == 3 else count * 10,
-                "max_hp": 160 if kind == 3 else count * 10,
-                "soldiers": count * 10, "starting_soldiers": count * 10,
-                "x": base_x, "lane": kind
-            })
-            for n in range(count):
-                var column: int = n % 8
-                var row: int = int(n / 8)
-                var direction: float = 1.0 if team == 0 else -1.0
-                soldiers_visual.append({
-                    "team": team, "group": group_id, "kind": kind,
-                    "x": base_x - direction * float(row) * 13.0 + direction * float(column) * 3.0,
-                    "y": 68.0 + float(kind) * 83.0 + float(column - 4) * 9.0,
-                    "hp": 10.0, "cooldown": float(n % 5) * 0.13,
-                    "attack_flash": 0.0
-                })
-    active = true
-    tick = 0.0
-    battle_elapsed = 0.0
-    status.text = "戰鬥測試"
-    _refresh()
 
 func _process(delta: float) -> void:
     if not active:
         return
-    var dt: float = minf(delta, 0.08)
-    tick += dt
-    battle_elapsed += dt
-    # Cache living enemy indices once each frame; 200 actors are the hard cap.
+    # Settle existing defeat/timeout before moving, so a boundary cannot add extra damage.
+    if not campaign.advance(0.0).is_empty():
+        _finish_round()
+        return
+    var dt := minf(minf(maxf(delta, 0.0), 0.08), ROUND_SECONDS - campaign.elapsed)
     var living: Array = [[], []]
     for i in range(soldiers_visual.size()):
         if float(soldiers_visual[i]["hp"]) > 0.0:
             living[int(soldiers_visual[i]["team"])].append(i)
-    if _team_defeated(0) or _team_defeated(1):
-        _end_battle()
-        return
-    if battle_elapsed >= ROUND_SECONDS:
-        active = false
-        status.text = "99秒到！雙方撤退"
-        details.text = "第 %d 回合結束，保留生命與剩餘兵力。\n點擊「重新開始」可重新測試。" % round_count
-        field.queue_redraw()
-        return
     # Each actor selects a nearby enemy, approaches or attacks independently.
     for team in range(2):
         var enemies: Array = living[1 - team]
         for index in living[team]:
             var s: Dictionary = soldiers_visual[index]
+            if float(s["hp"]) <= 0.0:
+                continue
             var nearest := -1
             var best := INF
             var sx: float = float(s["x"])
@@ -294,24 +444,76 @@ func _process(delta: float) -> void:
             soldiers_visual[index] = s
     _move_generals(dt)
     _recount_armies()
-    _refresh()
+    # The timer measures elapsed play time even when rendering is slow.
+    var result := campaign.advance(maxf(delta, 0.0))
+    battle_elapsed = campaign.elapsed
+    if not result.is_empty():
+        _finish_round()
+    else:
+        _refresh()
 
-func _team_defeated(team: int) -> bool:
+func _refresh_item_info() -> void:
+    if item_info == null:
+        return
+    if not campaign_started:
+        item_info.text = ""
+        return
+    var s: Dictionary = general_stats[0]
+    item_info.text = "測試對象：我軍第1隊主將（數值暫定）\n武力 %d／255　智力 %d／255　忠誠 %d／100\n生命 %.1f／%.0f　技力 %d／%d\n丹藥%d　珠寶%d　生命藥%d　技力藥%d%s" % [s["might"], s["intellect"], s["loyalty"], s["hp"], s["max_hp"], s["mp"], s["max_mp"], inventory["attribute_pill"], inventory["loyalty_jewel"], inventory["hp_elixir"], inventory["mp_elixir"], "\n交戰暫停期間不可使用測試道具。" if campaign.phase == "fighting" else ""]
+
+func _team_defeated(side: int) -> bool:
     for g in generals:
-        if int(g["team"]) == team and float(g["hp"]) > 0.0:
+        if int(g["team"]) == side and float(g["hp"]) > 0.0:
             return false
     return true
 
-func _end_battle() -> void:
+func _result_text(result: String) -> String:
+    match result:
+        "timeout": return "99秒到，雙方撤回"
+        "attacker_victory": return "我軍勝利"
+        "defender_victory": return "敵軍勝利"
+        "draw": return "雙方武將全滅"
+    return ""
+
+func _finish_round() -> void:
     active = false
     _recount_armies()
-    if _team_defeated(0) and _team_defeated(1):
-        status.text = "平局！雙方武將全滅"
-    elif _team_defeated(1):
-        status.text = "我軍勝利！敵方武將全滅"
-    else:
-        status.text = "敵軍勝利！我方武將全滅"
-    details.text = "我軍兵力：%d｜敵軍兵力：%d\n武將全滅才算戰敗。" % [_total_soldiers(0), _total_soldiers(1)]
+    _refresh()
+    var final_result := campaign.campaign_result()
+    status.text = ("戰役結束 · " + _result_text(final_result)) if not final_result.is_empty() else ("本場結束 · " + _result_text(campaign.last_result))
+    details.text = "生命與剩餘兵力已保留。\n未出場隊伍已休整：存活武將+10生命。"
+    if campaign.last_result == "timeout":
+        details.text = "99秒撤回，不按生命或兵力判勝負。\n生命與兵力已保留，可重新選隊。"
+    next_round_button.visible = true
+    next_round_button.text = "查看戰役結果" if not final_result.is_empty() else "重新選隊"
+    field.queue_redraw()
+
+func _recount_armies() -> void:
+    for i in range(units.size()):
+        var total := 0.0
+        for s in soldiers_visual:
+            if int(s["group"]) == i:
+                total += float(s["hp"]) * float(s["troop_weight"])
+        units[i]["soldiers"] = maxi(0, int(ceil(total - 0.000001)))
+        units[i]["hp"] = units[i]["soldiers"]
+
+func _total_soldiers(side: int) -> int:
+    if not campaign_started or campaign.selected[side] < 0:
+        return 0
+    return campaign.troops(campaign.armies[side][campaign.selected[side]])
+
+func _refresh() -> void:
+    score.text = "我軍 %d兵　VS　敵軍 %d兵\n時間 %.1f／99秒" % [_total_soldiers(0), _total_soldiers(1), campaign.elapsed]
+    var lines: Array[String] = []
+    for side in range(2):
+        var general_lines: Array[String] = []
+        for g in generals:
+            if int(g["team"]) == side:
+                general_lines.append("%d.%s %.1f／%.0f%s" % [int(g["slot"]) + 1, ["主將", "副將", "副將"][int(g["slot"])], g["hp"], g["max_hp"], " †" if float(g["hp"]) <= 0.0 else ""])
+        lines.append(("我軍：" if side == 0 else "敵軍：") + "　".join(general_lines))
+    general_info.text = "\n".join(lines)
+    if active:
+        details.text = "武將全部陣亡才算本隊戰敗。\n本場損失：我軍%d兵／敵軍%d兵" % [starting_troops[0] - _total_soldiers(0), starting_troops[1] - _total_soldiers(1)]
     field.queue_redraw()
 
 func _move_generals(dt: float) -> void:
@@ -358,32 +560,6 @@ func _move_generals(dt: float) -> void:
             general["cooldown"] = GENERAL_ATTACK_INTERVAL
         generals[gi] = general
 
-func _recount_armies() -> void:
-    for i in range(units.size()):
-        if int(units[i]["kind"]) == 3:
-            continue
-        var total_hp := 0.0
-        for s in soldiers_visual:
-            if int(s["group"]) == i:
-                total_hp += float(s["hp"])
-        var group: Dictionary = units[i]
-        group["soldiers"] = int(ceil(total_hp))
-        group["hp"] = int(ceil(total_hp))
-        units[i] = group
-
-func _total_soldiers(team: int) -> int:
-    var total := 0
-    for group in units:
-        if int(group["team"]) == team and int(group["kind"]) != 3:
-            total += int(group["soldiers"])
-    return total
-
-func _refresh() -> void:
-    score.text = "我軍 %d 兵／%d 生命 VS 敵軍 %d 兵／%d 生命" % [_total_soldiers(0), int(generals[0]["hp"]), _total_soldiers(1), int(generals[1]["hp"])]
-    if active:
-        details.text = "時間：%d／99秒｜武將全滅判敗\n我軍損失：%d　敵軍損失：%d" % [int(battle_elapsed), 1000 - _total_soldiers(0), 1000 - _total_soldiers(1)]
-    field.queue_redraw()
-
 func _draw_field() -> void:
     if not battle.visible:
         return
@@ -408,7 +584,7 @@ func _draw_field() -> void:
             field.draw_line(Vector2(x + 4.0, y - 10.0), Vector2(x + 4.0, y + 5.0), Color("#e8c36d"), 1.0)
         elif kind == 2:
             field.draw_line(Vector2(x - 4.0, y - 7.0), Vector2(x + 4.0, y + 4.0), Color("#e9f4ff"), 1.0)
-    # Generals are shown separately; their individual combat is a later milestone.
+    # General records are shared with the selected campaign squad.
     for general in generals:
         if float(general["hp"]) <= 0.0:
             continue
@@ -417,3 +593,7 @@ func _draw_field() -> void:
         var general_y: float = float(general["y"])
         field.draw_rect(Rect2(general_x - 9.0, general_y - 15.0, 18.0, 23.0), COLORS[team])
         field.draw_circle(Vector2(general_x, general_y - 19.0), 7.0, Color("#e8c36d"))
+        var hp_ratio: float = float(general["hp"]) / float(general["max_hp"])
+        field.draw_rect(Rect2(general_x - 13.0, general_y - 32.0, 26.0, 4.0), Color("#182923"))
+        field.draw_rect(Rect2(general_x - 13.0, general_y - 32.0, 26.0 * hp_ratio, 4.0), Color("#90dba4"))
+        field.draw_string(ui_font, Vector2(general_x - 4.0, general_y + 22.0), str(int(general["slot"]) + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
