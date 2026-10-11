@@ -239,7 +239,7 @@ func _draw_field() -> void:
     var scale_x: float = w / FIELD_W
     field.draw_rect(Rect2(Vector2.ZERO, Vector2(w, h)), Color("#193c30"))
     for lane in range(4):
-        var y: float = 65.0 + float(lane) * 58.0
+        var y: float = 75.0 + float(lane) * 75.0
         field.draw_line(Vector2(0, y), Vector2(w, y), Color("#315746"), 1.0)
     # Independent visual actors (simulation remains group-based for this prototype).
     for s in soldiers_visual:
@@ -249,7 +249,6 @@ func _draw_field() -> void:
         var starting: int = int(u["starting_soldiers"])
         var current: int = int(u["soldiers"])
         var allowed: int = mini(MAX_VISIBLE_PER_GROUP, int(ceil(float(current) * MAX_VISIBLE_PER_GROUP / float(starting))))
-        var local_index: int = int(s["group"]) * MAX_VISIBLE_PER_GROUP
         # Soldiers are appended only for non-general groups: use stable per-group index.
         var group_slot: int = int(soldiers_visual.find(s))
         var same_group_index: int = 0
