@@ -14,6 +14,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Prepare Android debug export environment
+        env:
+          MCX_DEBUG_KEYSTORE_BASE64: ${{ secrets.MCX_DEBUG_KEYSTORE_BASE64 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -32,10 +34,16 @@ jobs:
           echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
           echo "GODOT_JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
           mkdir -p "$HOME/.config/godot"
-          if [ ! -f "$HOME/.android/debug.keystore" ]; then
-            mkdir -p "$HOME/.android"
-            keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=MCX,C=MY"
+          mkdir -p "$HOME/.android"
+          if [ -n "${MCX_DEBUG_KEYSTORE_BASE64:-}" ]; then
+            printf '%s' "$MCX_DEBUG_KEYSTORE_BASE64" | base64 --decode > "$HOME/.android/debug.keystore"
+            chmod 600 "$HOME/.android/debug.keystore"
+            echo "Using stable debug signing key from GitHub Actions secret."
+          else
+            echo "::warning::MCX_DEBUG_KEYSTORE_BASE64 secret is missing. Generating an ephemeral debug key; this APK cannot update earlier builds signed with another key."
+            keytool -genkeypair -keystore "$HOME/.android/debug.keystore" -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=MCX,C=MY"
           fi
+          keytool -list -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey >/dev/null
           SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/opt/android-sdk}}"
           echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
