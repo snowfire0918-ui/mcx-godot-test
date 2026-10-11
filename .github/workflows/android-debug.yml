@@ -1,0 +1,28 @@
+name: Godot Android Debug APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  android-debug:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/abarichello/godot-ci:4.4.1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Import Godot project
+        run: godot --headless --editor --path . --import --quit
+      - name: Export Android debug APK
+        run: |
+          mkdir -p build
+          godot --headless --path . --export-debug "Android" build/mcx-godot-test-debug.apk
+          test -s build/mcx-godot-test-debug.apk
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcx-godot-test-debug
+          path: build/mcx-godot-test-debug.apk
+          if-no-files-found: error
