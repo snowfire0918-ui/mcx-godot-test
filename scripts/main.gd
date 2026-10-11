@@ -126,11 +126,17 @@ func _refresh_item_info() -> void:
     var s: Dictionary = general_stats[0]
     item_info.text = "我軍武力 %d　智力 %d　忠誠 %d　技力 %d/999\n丹藥 %d　珠寶 %d　生命藥 %d　技力藥 %d" % [int(s["might"]), int(s["intellect"]), int(s["loyalty"]), int(s["mp"]), int(inventory["attribute_pill"]), int(inventory["loyalty_jewel"]), int(inventory["hp_elixir"]), int(inventory["mp_elixir"])]
 
+func _chinese_font() -> Font:
+    var font := SystemFont.new()
+    font.font_names = PackedStringArray(["Noto Sans CJK SC", "Noto Sans CJK TC", "Noto Sans", "sans-serif"])
+    return font
+
 func _label(value: String, font_size: int) -> Label:
     var l := Label.new()
     l.text = value
     l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    l.add_theme_font_override("font", _chinese_font())
     l.add_theme_font_size_override("font_size", font_size)
     l.add_theme_color_override("font_color", Color.WHITE)
     return l
@@ -138,6 +144,7 @@ func _label(value: String, font_size: int) -> Label:
 func _button(value: String) -> Button:
     var b := Button.new()
     b.text = value
+    b.add_theme_font_override("font", _chinese_font())
     b.custom_minimum_size = Vector2(0, 90)
     return b
 
