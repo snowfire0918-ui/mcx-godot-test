@@ -19,7 +19,7 @@ static func build(attackers: int = 3, defenders: int = 3, generals_per_squad: in
                     "hp": PROTOTYPE_GENERAL_HP, "max_hp": PROTOTYPE_GENERAL_HP,
                     "mp": 80 if side == 0 else 90, "max_mp": 80 if side == 0 else 90,
                     "might": 80 if side == 0 else 75, "intellect": 65 if side == 0 else 70,
-                    "loyalty": 70})
+                    "loyalty": 70, "level": 1, "experience": 0})
             result[side].append({"id": id, "name": "第%d隊" % (index + 1), "generals": gs,
                 "soldiers": model.make_soldiers([300, 300, 400])})
     return result

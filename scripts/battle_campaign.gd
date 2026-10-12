@@ -1,7 +1,8 @@
 class_name BattleCampaign
 extends RefCounted
 
-# Rules approved in the V1.2 order; no character growth or item balance here.
+# Rules approved in the V1.2 order; no unapproved growth formula here.
+const RpgRules = preload("res://scripts/rpg_rules.gd")
 const ROUND_SECONDS := 99.0
 const REST_HEAL := 10.0
 const MAX_ATTRIBUTE := 255
@@ -14,6 +15,8 @@ var elapsed := 0.0
 var round_number := 0
 var phase := "selection"
 var last_result := ""
+var support_choices: Dictionary = {}
+var round_support: Dictionary = {}
 
 func configure(attackers: Array, defenders: Array) -> String:
     if attackers.is_empty() or attackers.size() > 5:
@@ -31,6 +34,8 @@ func configure(attackers: Array, defenders: Array) -> String:
     elapsed = 0.0
     round_number = 0
     last_result = ""
+    support_choices.clear()
+    round_support.clear()
     phase = "selection" if campaign_result().is_empty() else "finished"
     return ""
 
@@ -105,14 +110,50 @@ func begin_round(attacker: int, defender: int) -> bool:
     round_number += 1
     last_result = ""
     phase = "fighting"
+    round_support.clear()
+    for side in range(2):
+        for g in armies[side][selected[side]]["generals"]:
+            if float(g["hp"]) <= 0.0:
+                continue
+            var choice: Dictionary = support_choices.get(g["id"], {})
+            if choice.get("kind") == "entry_heal":
+                g["hp"] = minf(float(g["max_hp"]), float(g["hp"]) + RpgRules.entry_heal(int(choice["level"])))
+            elif choice.get("kind") == "regeneration":
+                round_support[g["id"]] = int(choice["level"])
+    return true
+
+func general_by_id(id: String) -> Dictionary:
+    for army in armies:
+        for squad in army:
+            for g in squad["generals"]:
+                if g["id"] == id:
+                    return g
+    return {}
+
+func set_support(general_id: String, kind: String, level: int) -> bool:
+    if phase == "fighting" or not RpgRules.valid_support(kind, level) or general_by_id(general_id).is_empty():
+        return false
+    if kind == "none":
+        support_choices.erase(general_id)
+    else:
+        support_choices[general_id] = {"kind": kind, "level": level}
     return true
 
 func advance(delta: float) -> String:
     if phase != "fighting" or not is_finite(delta) or delta < 0.0:
         return ""
+    var previous_second := int(floor(elapsed + 0.0000001))
     elapsed = minf(ROUND_SECONDS, elapsed + delta)
     var a_alive := squad_alive(armies[0][selected[0]])
     var d_alive := squad_alive(armies[1][selected[1]])
+    # Resolve lethal damage first. Recovery cannot bring an incapacitated general back.
+    if a_alive and d_alive:
+        var ticks := int(floor(elapsed + 0.0000001)) - previous_second
+        if ticks > 0:
+            for id in round_support:
+                var g := general_by_id(id)
+                if float(g["hp"]) > 0.0:
+                    g["hp"] = minf(float(g["max_hp"]), float(g["hp"]) + float(round_support[id]) * ticks)
     var result := ""
     if not a_alive and not d_alive:
         result = "draw"
@@ -126,6 +167,7 @@ func advance(delta: float) -> String:
         return ""
     # Transition before awarding rest, so duplicate calls cannot heal twice.
     phase = "selection"
+    round_support.clear()
     last_result = result
     for side in range(2):
         for index in range(armies[side].size()):
