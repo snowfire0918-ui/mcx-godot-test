@@ -19,6 +19,7 @@ func run_tests() -> void:
     var ui = load("res://scenes/main.tscn").instantiate()
     root.add_child(ui)
     ui.set_process(false)
+    check(not quit_on_go_back, "Android Back must not automatically quit the in-memory campaign")
     if not ui.has_method("_new_campaign"):
         check(false, "selection and campaign integration is missing")
         ui.free()
@@ -47,6 +48,28 @@ func run_tests() -> void:
     check(ui.campaign.elapsed == saved_elapsed, "home navigation pauses the encounter")
     ui._resume_campaign()
     check(ui.active and ui.generals[0]["hp"] == 17.5, "resume preserves the same running encounter")
+    # OS navigation must follow the same state-preserving path as the on-screen button.
+    ui.notification(Node.NOTIFICATION_WM_GO_BACK_REQUEST)
+    check(ui.home.visible and not ui.active, "Android Back pauses combat and returns home")
+    ui._process(5.0)
+    check(ui.campaign.elapsed == saved_elapsed and ui.generals[0]["hp"] == 17.5 and ui.soldiers_visual[0]["hp"] == 2.25,
+        "Android Back preserves the exact clock, general HP and soldier injury")
+    ui.notification(Node.NOTIFICATION_WM_GO_BACK_REQUEST)
+    var exit_confirmation = ui.get("exit_dialog")
+    check(exit_confirmation != null and exit_confirmation.visible, "Back from home asks before discarding a campaign")
+    ui.notification(Node.NOTIFICATION_WM_GO_BACK_REQUEST)
+    check(exit_confirmation != null and not exit_confirmation.visible, "Back cancels the exit confirmation")
+    ui._resume_campaign()
+    check(ui.active and ui.generals[0]["hp"] == 17.5, "cancelled exit can resume the same encounter")
+    ui.notification(Node.NOTIFICATION_APPLICATION_PAUSED)
+    ui.notification(Node.NOTIFICATION_APPLICATION_RESUMED)
+    check(ui.home.visible and not ui.active, "background and foreground leave combat safely paused")
+    ui._process(5.0)
+    check(ui.campaign.elapsed == saved_elapsed, "background time is not counted as combat time")
+    ui._request_new_campaign()
+    ui.notification(Node.NOTIFICATION_WM_GO_BACK_REQUEST)
+    check(not ui.reset_dialog.visible and ui.generals[0]["hp"] == 17.5, "Back cancels campaign reset without erasing state")
+    ui._resume_campaign()
     ui.generals[0]["hp"] = 0.0
     check(not ui._team_defeated(0), "commander death with living deputy is not team defeat")
     for g in ui.generals:

@@ -39,6 +39,7 @@ var deploy_button: Button
 var next_round_button: Button
 var resume_button: Button
 var reset_dialog: ConfirmationDialog
+var exit_dialog: ConfirmationDialog
 var attacker_count: SpinBox
 var defender_count: SpinBox
 var general_count: SpinBox
@@ -55,8 +56,25 @@ var item_info: Label
 var item_buttons: Array[Button] = []
 
 func _ready() -> void:
+    get_tree().quit_on_go_back = false
     _make_ui()
     _show_home()
+
+func _notification(what: int) -> void:
+    if not is_node_ready():
+        return
+    if what == NOTIFICATION_APPLICATION_PAUSED and active:
+        _show_home()
+    elif what == NOTIFICATION_WM_GO_BACK_REQUEST:
+        if reset_dialog.visible:
+            reset_dialog.hide()
+        elif exit_dialog.visible:
+            exit_dialog.hide()
+        elif not home.visible:
+            _show_home()
+        else:
+            exit_dialog.dialog_text = "退出後會清空本次戰役，尚無永久存檔。確定退出？" if campaign_started else "確定退出遊戲？"
+            exit_dialog.popup_centered(Vector2i(mini(560, int(size.x) - 24), 220))
 
 func _make_ui() -> void:
     ui_font = _chinese_font()
@@ -106,12 +124,22 @@ func _make_ui() -> void:
         item_buttons.append(button)
         home.add_child(button)
     reset_dialog = ConfirmationDialog.new()
+    reset_dialog.theme = theme
+    reset_dialog.dialog_autowrap = true
     reset_dialog.title = "建立新測試戰役"
     reset_dialog.dialog_text = "將清空目前的戰役傷勢、兵力與測試道具。確定重新建立？"
     reset_dialog.ok_button_text = "確定重建"
     reset_dialog.cancel_button_text = "保留戰役"
     reset_dialog.confirmed.connect(_new_campaign)
     add_child(reset_dialog)
+    exit_dialog = ConfirmationDialog.new()
+    exit_dialog.theme = theme
+    exit_dialog.dialog_autowrap = true
+    exit_dialog.title = "退出遊戲"
+    exit_dialog.ok_button_text = "確定退出"
+    exit_dialog.cancel_button_text = "繼續遊戲"
+    exit_dialog.confirmed.connect(get_tree().quit)
+    add_child(exit_dialog)
     selection = _column(layout)
     selection_info = _label("選隊出戰", 24)
     selection.add_child(selection_info)
@@ -367,8 +395,7 @@ func _process(delta: float) -> void:
     if not active:
         return
     # Settle existing defeat/timeout before moving, so a boundary cannot add extra damage.
-    if not campaign.advance(0.0).is_empty():
-        _finish_round()
+    if _settle_round_if_over():
         return
     var dt := minf(minf(maxf(delta, 0.0), 0.08), ROUND_SECONDS - campaign.elapsed)
     var living: Array = [[], []]
@@ -441,8 +468,12 @@ func _process(delta: float) -> void:
                     soldiers_visual[nearest] = target
                 s["cooldown"] = SOLDIER_ATTACK_INTERVAL * (1.3 if kind == 2 else 1.0)
                 s["attack_flash"] = 0.15
+                if general_target >= 0 and float(target["hp"]) <= 0.0 and _settle_round_if_over():
+                    return
             soldiers_visual[index] = s
     _move_generals(dt)
+    if not active:
+        return
     _recount_armies()
     # The timer measures elapsed play time even when rendering is slow.
     var result := campaign.advance(maxf(delta, 0.0))
@@ -451,6 +482,13 @@ func _process(delta: float) -> void:
         _finish_round()
     else:
         _refresh()
+
+func _settle_round_if_over() -> bool:
+    # Damage resolves sequentially: the final general's death ends all actor turns.
+    if campaign.advance(0.0).is_empty():
+        return false
+    _finish_round()
+    return true
 
 func _refresh_item_info() -> void:
     if item_info == null:
@@ -558,6 +596,8 @@ func _move_generals(dt: float) -> void:
             else:
                 soldiers_visual[nearest] = target
             general["cooldown"] = GENERAL_ATTACK_INTERVAL
+            if enemy_general >= 0 and float(target["hp"]) <= 0.0 and _settle_round_if_over():
+                return
         generals[gi] = general
 
 func _draw_field() -> void:

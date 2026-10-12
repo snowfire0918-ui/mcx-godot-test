@@ -25,11 +25,18 @@ func capture() -> void:
     ui.campaign.elapsed = 99.0
     ui._process(0.0)
     await snap("withdrawal")
+    ui._show_home()
+    ui.notification(Node.NOTIFICATION_WM_GO_BACK_REQUEST)
+    await snap("exit-confirmation")
+    ui.notification(Node.NOTIFICATION_WM_GO_BACK_REQUEST)
     ui._show_selection()
     root.size = Vector2i(360, 800)
     await snap("selection-narrow")
+    ui._show_home()
+    ui.notification(Node.NOTIFICATION_WM_GO_BACK_REQUEST)
+    await snap("exit-confirmation-narrow")
     ui.free()
-    print("PREVIEW_CAPTURE: 5 desktop images saved in build/qa")
+    print("PREVIEW_CAPTURE: 7 desktop images saved in build/qa")
     quit()
 
 func snap(name: String) -> void:

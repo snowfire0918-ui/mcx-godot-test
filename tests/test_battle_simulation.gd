@@ -60,6 +60,37 @@ func run_tests() -> void:
     ui.generals[3].merge({"x": 452.0, "hp": 20.0}, true)
     ui._process(0.016)
     check(ui.generals[3]["hp"] == 18.0, "generals attack enemy generals when all soldiers are gone")
+    # A squad loses immediately when its final general falls, even mid-frame.
+    ui.general_count.value = 1
+    ui._new_campaign()
+    ui.campaign.armies[0][1]["generals"][0]["hp"] = 100.0
+    ui._start_selected_round()
+    for s in ui.soldiers_visual:
+        s["hp"] = 0.0
+    ui.generals[0].merge({"hp": 0.5, "x": 100.0, "y": 80.0, "cooldown": 10.0}, true)
+    ui.generals[1].merge({"hp": 0.5, "x": 800.0, "y": 80.0, "cooldown": 10.0}, true)
+    ui.soldiers_visual[0].merge({"hp": 10.0, "x": 798.0, "y": 80.0, "cooldown": 0.0}, true)
+    ui.soldiers_visual[100].merge({"hp": 10.0, "x": 102.0, "y": 80.0, "cooldown": 0.0}, true)
+    ui._process(0.016)
+    check(ui.campaign.last_result == "attacker_victory", "first final-general death ends the round, not a later false draw")
+    check(ui.generals[0]["hp"] == 0.5, "defeated squad's soldiers cannot retaliate later in the frame")
+    ui._process(0.016)
+    check(ui.campaign.armies[0][1]["generals"][0]["hp"] == 110.0, "mid-frame settlement grants reserve healing exactly once")
+    # A general's killing blow also stops later allies from damaging the defeated squad.
+    ui.general_count.value = 3
+    ui._new_campaign()
+    ui._start_selected_round()
+    for s in ui.soldiers_visual:
+        s["hp"] = 0.0
+    for g in ui.generals:
+        g["hp"] = 0.0
+    ui.generals[0].merge({"hp": 0.5, "x": 450.0, "y": 80.0, "cooldown": 0.0}, true)
+    ui.generals[1].merge({"hp": 240.0, "x": 800.0, "y": 80.0, "cooldown": 0.0}, true)
+    ui.generals[3].merge({"hp": 0.5, "x": 452.0, "y": 80.0, "cooldown": 10.0}, true)
+    ui.soldiers_visual[100].merge({"hp": 10.0, "x": 802.0, "y": 80.0, "cooldown": 10.0}, true)
+    ui._process(0.016)
+    check(ui.campaign.last_result == "attacker_victory" and ui.soldiers_visual[100]["hp"] == 10.0,
+        "general killing blow stops subsequent actors before extra casualties")
     ui.free()
     print("BATTLE_SIMULATION_TESTS: ", checks - failures, "/", checks, " passed")
     quit(1 if failures > 0 else 0)
