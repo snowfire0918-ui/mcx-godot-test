@@ -44,6 +44,7 @@ func _initialize() -> void:
         test_round_trips()
         test_rejection()
         test_files()
+        test_missing_names()
     clean()
     DirAccess.remove_absolute("user://store-test/blocked")
     print("CAMPAIGN_STORE_TESTS: ", checks - failures, "/", checks, " passed")
@@ -148,3 +149,30 @@ func test_files() -> void:
     blocker.close()
     var blocked_store = store_script.new("user://store-test/blocked/campaign.json")
     check(blocked_store.save(c, stock) != "", "unwritable destination reports failure")
+
+func test_missing_names() -> void:
+    for target in ["squad", "general"]:
+        clean()
+        var c = fresh()
+        var stock := Rules.inventory()
+        var store = store_script.new(SAVE)
+        store.save(c, stock)
+        c.armies[0][0]["generals"][0]["hp"] = 123.5
+        stock["attribute_pill"] = 1
+        store.save(c, stock)
+        var packet: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(SAVE))
+        var record: Dictionary = packet.campaign.armies[0][0]
+        if target == "general":
+            record = record.generals[0]
+        record.erase("name")
+        var malformed := JSON.stringify(packet, "", false, true)
+        write_raw(malformed)
+        var result: Dictionary = store.load_into(c, stock)
+        check(result.error == "" and result.recovered and c.armies[0][0]["generals"][0]["hp"] == 240 and stock["attribute_pill"] == 2,
+            "missing %s name restores valid backup with matching stock" % target)
+        DirAccess.remove_absolute(SAVE + ".bak")
+        var before: Dictionary = c.snapshot()
+        var before_stock := stock.duplicate()
+        result = store.load_into(c, stock)
+        check(result.error != "" and c.snapshot() == before and stock == before_stock and FileAccess.get_file_as_string(SAVE) == malformed,
+            "missing %s name without backup is rejected atomically" % target)

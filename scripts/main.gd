@@ -284,12 +284,14 @@ func _show_rpg() -> void:
 func _save_campaign(replace_invalid: bool = false) -> bool:
     if not campaign_started:
         return true
+    # Bound automatic retries even while storage remains unavailable.
+    # Explicit pause, mutation and exit saves still run immediately.
+    next_checkpoint = campaign.elapsed + 5.0
     var error: String = store.save(campaign, inventory, replace_invalid)
     if not error.is_empty():
         save_notice.text = "儲存失敗：" + error
         return false
     saved_file_present = true
-    next_checkpoint = campaign.elapsed + 5.0
     save_notice.text = "已保存本機戰役 · 第%d場" % campaign.round_number
     return true
 

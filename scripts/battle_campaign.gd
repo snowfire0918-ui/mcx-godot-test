@@ -54,7 +54,7 @@ func _take_id(record: Dictionary, identities: Dictionary) -> bool:
 func _validate_squad(squad: Variant, identities: Dictionary) -> String:
     if not squad is Dictionary or not _take_id(squad, identities):
         return "隊伍身分資料缺失或重複。"
-    if not squad.get("name", "") is String:
+    if not squad.get("name") is String:
         return "隊伍名稱無效。"
     var gs: Variant = squad.get("generals")
     if not gs is Array or gs.is_empty() or gs.size() > 3:
@@ -62,7 +62,7 @@ func _validate_squad(squad: Variant, identities: Dictionary) -> String:
     for g in gs:
         if not g is Dictionary or not _take_id(g, identities):
             return "武將身分資料缺失或重複。"
-        if not g.get("name", "") is String or not _integer(g.get("level", 1), 1) or not _integer(g.get("experience", 0), 0):
+        if not g.get("name") is String or not _integer(g.get("level", 1), 1) or not _integer(g.get("experience", 0), 0):
             return "武將名稱／成長資料無效。"
         if not _valid_actor(g):
             return "武將場上資料無效。"
