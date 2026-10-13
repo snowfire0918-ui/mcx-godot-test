@@ -12,11 +12,17 @@ func check(condition: bool, message: String) -> void:
 func _initialize() -> void:
     call_deferred("run_tests")
 
+func clean_save() -> void:
+    for suffix in ["", ".bak", ".tmp", ".bak.tmp"]:
+        DirAccess.remove_absolute("user://test_battle_ui.json" + suffix)
+
 func run_tests() -> void:
+    clean_save()
     # Test narrow logical layouts independently from the 720-wide stretch canvas.
     root.content_scale_size = Vector2i.ZERO
     root.size = Vector2i(720, 1280)
     var ui = load("res://scenes/main.tscn").instantiate()
+    ui.save_path = "user://test_battle_ui.json"
     root.add_child(ui)
     ui.set_process(false)
     check(not quit_on_go_back, "Android Back must not automatically quit the in-memory campaign")
@@ -126,5 +132,6 @@ func run_tests() -> void:
         check(ui.layout.size.x <= width, "selection fits viewport width %d" % width)
         check(ui.deploy_button.size.x <= width, "deploy button fits viewport width %d" % width)
     ui.free()
+    clean_save()
     print("BATTLE_UI_TESTS: ", checks - failures, "/", checks, " passed")
     quit(1 if failures > 0 else 0)

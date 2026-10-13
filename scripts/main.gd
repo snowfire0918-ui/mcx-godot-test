@@ -1,11 +1,11 @@
 extends Control
 
-# V0.0.10 implements the approved V1.2 P1 rules. Art / damage / rosters are prototypes.
+# V0.0.11 adds V1.2 RPG effects and local saves. Art / damage / rosters remain prototypes.
 const Campaign = preload("res://scripts/battle_campaign.gd")
 const PrototypeRoster = preload("res://scripts/prototype_roster.gd")
-const MAX_HP := 999
-const MAX_ATTRIBUTE := 255
-const MAX_MP := 999
+const Rules = preload("res://scripts/rpg_rules.gd")
+const Store = preload("res://scripts/campaign_store.gd")
+const RpgPanel = preload("res://scripts/rpg_panel.gd")
 const ROUND_SECONDS := 99.0
 const GENERAL_ATTACK_INTERVAL := 0.65
 const FIELD_W := 920.0
@@ -18,7 +18,6 @@ const GENERAL_REACH := 22.0
 const GENERAL_DAMAGE := 2.0
 const FIELD_DISPLAY_H := 350.0
 const COLORS := [Color("#5ba6e6"), Color("#e46d67")]
-const ITEM_NAMES := {"attribute_pill": "武力丹", "loyalty_jewel": "忠誠珠寶", "hp_elixir": "生命靈藥", "mp_elixir": "技力靈藥"}
 
 var campaign = Campaign.new()
 var campaign_started := false
@@ -38,6 +37,13 @@ var squad_details: Array[Label] = []
 var deploy_button: Button
 var next_round_button: Button
 var resume_button: Button
+var manage_button: Button
+var rpg_panel: VBoxContainer
+var save_notice: Label
+var save_path := "user://campaign-v1.json"
+var store
+var saved_file_present := false
+var next_checkpoint := 5.0
 var reset_dialog: ConfirmationDialog
 var exit_dialog: ConfirmationDialog
 var attacker_count: SpinBox
@@ -50,20 +56,19 @@ var starting_troops := [0, 0]
 var soldiers_visual: Array[Dictionary] = []
 var battle_elapsed := 0.0
 var generals: Array[Dictionary] = []
-var general_stats := [{"might": 80, "intellect": 65, "loyalty": 70, "mp": 80, "max_mp": 80}, {"might": 75, "intellect": 70, "loyalty": 70, "mp": 90, "max_mp": 90}]
-var inventory := {"attribute_pill": 2, "loyalty_jewel": 2, "hp_elixir": 2, "mp_elixir": 2}
-var item_info: Label
-var item_buttons: Array[Button] = []
+var inventory := Rules.inventory()
 
 func _ready() -> void:
     get_tree().quit_on_go_back = false
+    store = Store.new(save_path)
     _make_ui()
-    _show_home()
+    _restore_campaign()
+    _show_home(false)
 
 func _notification(what: int) -> void:
     if not is_node_ready():
         return
-    if what == NOTIFICATION_APPLICATION_PAUSED and active:
+    if what == NOTIFICATION_APPLICATION_PAUSED and campaign_started:
         _show_home()
     elif what == NOTIFICATION_WM_GO_BACK_REQUEST:
         if reset_dialog.visible:
@@ -73,7 +78,7 @@ func _notification(what: int) -> void:
         elif not home.visible:
             _show_home()
         else:
-            exit_dialog.dialog_text = "退出後會清空本次戰役，尚無永久存檔。確定退出？" if campaign_started else "確定退出遊戲？"
+            exit_dialog.dialog_text = "將保存本機戰役，下次可繼續。確定退出？" if campaign_started else "確定退出遊戲？"
             exit_dialog.popup_centered(Vector2i(mini(560, int(size.x) - 24), 220))
 
 func _make_ui() -> void:
@@ -102,7 +107,9 @@ func _make_ui() -> void:
     var brand := _label("MCX GAMES", 34)
     brand.add_theme_color_override("font_color", Color("#e8c36d"))
     layout.add_child(brand)
-    layout.add_child(_label("三國：我的三國我做主\n第一代豪華重製版 · 測試 V0.0.10", 22))
+    layout.add_child(_label("三國：我的三國我做主\n第一代豪華重製版 · 測試 V0.0.11", 22))
+    save_notice = _label("", 16)
+    layout.add_child(save_notice)
     home = _column(layout)
     home.add_child(_label("戰役設定（原型參數）", 26))
     attacker_count = _count_input(home, "我軍進攻隊伍", 1, 5, 3)
@@ -115,19 +122,15 @@ func _make_ui() -> void:
     resume_button = _button("繼續戰役")
     resume_button.pressed.connect(_resume_campaign)
     home.add_child(resume_button)
-    home.add_child(_label("此版只在本次開啟期間保留戰役。\n關閉程式後尚無永久存檔。", 18))
-    item_info = _label("", 18)
-    home.add_child(item_info)
-    for key in ITEM_NAMES:
-        var button := _button("測試使用：" + ITEM_NAMES[key])
-        button.pressed.connect(_use_item.bind(key))
-        item_buttons.append(button)
-        home.add_child(button)
+    manage_button = _button("武將／道具／軍師技測試")
+    manage_button.pressed.connect(_show_rpg)
+    home.add_child(manage_button)
+    home.add_child(_label("戰役自動保存在本機；重新開啟可繼續。\n交戰每5秒保存，返回首頁時也會保存。", 18))
     reset_dialog = ConfirmationDialog.new()
     reset_dialog.theme = theme
     reset_dialog.dialog_autowrap = true
     reset_dialog.title = "建立新測試戰役"
-    reset_dialog.dialog_text = "將清空目前的戰役傷勢、兵力與測試道具。確定重新建立？"
+    reset_dialog.dialog_text = "將重建並覆寫本機戰役、傷勢、兵力與測試道具。確定重新建立？"
     reset_dialog.ok_button_text = "確定重建"
     reset_dialog.cancel_button_text = "保留戰役"
     reset_dialog.confirmed.connect(_new_campaign)
@@ -138,7 +141,7 @@ func _make_ui() -> void:
     exit_dialog.title = "退出遊戲"
     exit_dialog.ok_button_text = "確定退出"
     exit_dialog.cancel_button_text = "繼續遊戲"
-    exit_dialog.confirmed.connect(get_tree().quit)
+    exit_dialog.confirmed.connect(_confirm_quit)
     add_child(exit_dialog)
     selection = _column(layout)
     selection_info = _label("選隊出戰", 24)
@@ -183,7 +186,11 @@ func _make_ui() -> void:
     var pause := _button("暫停／返回首頁")
     pause.pressed.connect(_show_home)
     battle.add_child(pause)
-    _refresh_item_info()
+    rpg_panel = RpgPanel.new()
+    rpg_panel.theme = theme
+    rpg_panel.state_changed.connect(_save_campaign)
+    rpg_panel.return_requested.connect(_show_home)
+    layout.add_child(rpg_panel)
 
 func _column(parent: Node) -> VBoxContainer:
     var column := VBoxContainer.new()
@@ -230,7 +237,7 @@ func _button(value: String) -> Button:
     return button
 
 func _request_new_campaign() -> void:
-    if campaign_started:
+    if campaign_started or saved_file_present:
         reset_dialog.popup_centered(Vector2i(mini(560, int(size.x) - 24), 220))
     else:
         _new_campaign()
@@ -239,28 +246,86 @@ func _new_campaign() -> void:
     var roster: Array = PrototypeRoster.build(int(attacker_count.value), int(defender_count.value), int(general_count.value))
     var error := campaign.configure(roster[0], roster[1])
     if not error.is_empty():
-        item_info.text = error
+        save_notice.text = error
         return
     campaign_started = true
     active = false
     generals.clear()
     soldiers_visual.clear()
     units.clear()
-    general_stats = [campaign.armies[0][0]["generals"][0], campaign.armies[1][0]["generals"][0]]
-    inventory = {"attribute_pill": 2, "loyalty_jewel": 2, "hp_elixir": 2, "mp_elixir": 2}
+    inventory = Rules.inventory()
+    rpg_panel.side_picker.select(0)
+    rpg_panel.squad_picker.select(-1)
+    rpg_panel.general_picker.select(-1)
+    rpg_panel.bind(campaign, inventory)
+    _save_campaign(true)
     _show_selection()
 
-func _show_home() -> void:
+func _show_home(save: bool = true) -> void:
     active = false
     home.visible = true
     selection.visible = false
     battle.visible = false
+    rpg_panel.visible = false
     resume_button.visible = campaign_started
-    for button in item_buttons:
-        button.visible = campaign_started
-        button.disabled = campaign.phase == "fighting"
-    _refresh_item_info()
+    manage_button.visible = campaign_started
+    if save:
+        _save_campaign()
     scroll.scroll_vertical = 0
+
+func _show_rpg() -> void:
+    if not campaign_started:
+        return
+    _show_home()
+    home.visible = false
+    rpg_panel.bind(campaign, inventory)
+    rpg_panel.visible = true
+
+func _save_campaign(replace_invalid: bool = false) -> bool:
+    if not campaign_started:
+        return true
+    var error: String = store.save(campaign, inventory, replace_invalid)
+    if not error.is_empty():
+        save_notice.text = "儲存失敗：" + error
+        return false
+    saved_file_present = true
+    next_checkpoint = campaign.elapsed + 5.0
+    save_notice.text = "已保存本機戰役 · 第%d場" % campaign.round_number
+    return true
+
+func _restore_campaign() -> bool:
+    var result: Dictionary = store.load_into(campaign, inventory)
+    saved_file_present = result.found
+    if not result.error.is_empty():
+        save_notice.text = "讀取失敗：" + result.error
+        return false
+    if not result.found:
+        save_notice.text = "尚無本機戰役存檔。"
+        return false
+    campaign_started = true
+    active = false
+    attacker_count.value = campaign.armies[0].size()
+    defender_count.value = campaign.armies[1].size()
+    general_count.value = campaign.armies[0][0]["generals"].size()
+    rpg_panel.bind(campaign, inventory)
+    _bind_round_actors(false)
+    next_checkpoint = campaign.elapsed + 5.0
+    if not generals.is_empty():
+        if campaign.phase == "fighting":
+            status.text = "第%d場 · 自動交戰" % campaign.round_number
+            next_round_button.visible = false
+            _refresh()
+        else:
+            _finish_round(false)
+    save_notice.text = "已由備份恢復，請核對進度。" if result.recovered else "已讀取本機戰役，按繼續恢復。"
+    return true
+
+func _confirm_quit() -> void:
+    if not _save_campaign():
+        exit_dialog.dialog_text = save_notice.text + "\n請取消退出後重試。"
+        exit_dialog.call_deferred("popup_centered", Vector2i(mini(560, int(size.x) - 24), 220))
+        return
+    get_tree().quit()
 
 func _resume_campaign() -> void:
     if not campaign_started:
@@ -270,6 +335,7 @@ func _resume_campaign() -> void:
     else:
         home.visible = false
         selection.visible = false
+        rpg_panel.visible = false
         battle.visible = true
         active = campaign.phase == "fighting"
         scroll.scroll_vertical = 0
@@ -282,6 +348,7 @@ func _show_selection() -> void:
     home.visible = false
     battle.visible = false
     selection.visible = true
+    rpg_panel.visible = false
     var result := campaign.campaign_result()
     selection_info.text = "第%d場 · 選隊出戰" % (campaign.round_number + 1)
     if not result.is_empty():
@@ -317,21 +384,43 @@ func _selection_changed(index: int, side: int) -> void:
     for slot in range(squad["generals"].size()):
         var g: Dictionary = squad["generals"][slot]
         lines.append("%s · 生命 %.1f／%.0f%s" % [g["name"], g["hp"], g["max_hp"], "（陣亡）" if float(g["hp"]) <= 0.0 else ""])
+        var support: Dictionary = campaign.support_choices.get(g["id"], {})
+        if not support.is_empty():
+            lines.append("測試軍師技：" + Rules.support_label(support["kind"], int(support["level"])))
     squad_details[side].text = "\n".join(lines)
 
 func _start_selected_round() -> void:
     if not campaign.begin_round(squad_pickers[0].selected, squad_pickers[1].selected):
         return
+    _bind_round_actors(true)
+    active = true
+    battle_elapsed = 0.0
+    home.visible = false
+    selection.visible = false
+    rpg_panel.visible = false
+    battle.visible = true
+    status.text = "第%d場 · 自動交戰" % campaign.round_number
+    next_round_button.visible = false
+    scroll.scroll_vertical = 0
+    _recount_armies()
+    _refresh()
+    _save_campaign()
+
+func _bind_round_actors(reset_positions: bool) -> void:
     units.clear()
     soldiers_visual.clear()
     generals.clear()
+    if campaign.selected.has(-1):
+        return
     for side in range(2):
         var squad: Dictionary = campaign.armies[side][campaign.selected[side]]
-        starting_troops[side] = campaign.troops(squad)
+        starting_troops[side] = campaign.round_start_troops[side]
         var base_x: float = 125.0 if side == 0 else 795.0
         for slot in range(squad["generals"].size()):
             var g: Dictionary = squad["generals"][slot]
-            g.merge({"team": side, "slot": slot, "x": base_x, "y": 275.0 + float(slot) * 22.0, "cooldown": 0.0}, true)
+            g.merge({"team": side, "slot": slot}, true)
+            if reset_positions or not (g.has("x") and g.has("y") and g.has("cooldown")):
+                g.merge({"x": base_x, "y": 275.0 + float(slot) * 22.0, "cooldown": 0.0}, true)
             generals.append(g)
         for kind in range(3):
             var group_id := units.size()
@@ -343,52 +432,18 @@ func _start_selected_round() -> void:
                 var column: int = n % 8
                 var row: int = int(n / 8)
                 var direction: float = 1.0 if side == 0 else -1.0
-                s.merge({"team": side, "group": group_id,
-                    "x": base_x - direction * float(row) * 13.0 + direction * float(column) * 3.0,
-                    "y": 68.0 + float(kind) * 83.0 + float(column - 4) * 9.0,
-                    "cooldown": float(n % 5) * 0.13, "attack_flash": 0.0}, true)
+                s.merge({"team": side, "group": group_id}, true)
+                if reset_positions or not (s.has("x") and s.has("y") and s.has("cooldown")):
+                    s.merge({"x": base_x - direction * float(row) * 13.0 + direction * float(column) * 3.0,
+                        "y": 68.0 + float(kind) * 83.0 + float(column - 4) * 9.0,
+                        "cooldown": float(n % 5) * 0.13, "attack_flash": 0.0}, true)
+                s["attack_flash"] = s.get("attack_flash", 0.0)
                 soldiers_visual.append(s)
                 n += 1
-    active = true
-    battle_elapsed = 0.0
-    home.visible = false
-    selection.visible = false
-    battle.visible = true
-    status.text = "第%d場 · 自動交戰" % campaign.round_number
-    next_round_button.visible = false
-    scroll.scroll_vertical = 0
     _recount_armies()
-    _refresh()
 
-func _use_item(item_key: String) -> void:
-    if campaign_started and campaign.phase == "fighting":
-        return
-    if int(inventory.get(item_key, 0)) <= 0:
-        return
-    var stats: Dictionary = general_stats[0]
-    var changed := false
-    match item_key:
-        "attribute_pill":
-            var value := mini(MAX_ATTRIBUTE, int(stats["might"]) + 5) # Prototype +5; not final balance.
-            changed = value != int(stats["might"])
-            stats["might"] = value
-        "loyalty_jewel":
-            var value := mini(100, int(stats["loyalty"]) + 10)
-            changed = value != int(stats["loyalty"])
-            stats["loyalty"] = value
-        "hp_elixir":
-            if stats.has("hp") and float(stats["hp"]) > 0.0:
-                var value := minf(float(stats["max_hp"]), float(stats["hp"]) + 30.0)
-                changed = value != float(stats["hp"])
-                stats["hp"] = value
-        "mp_elixir":
-            var value := mini(mini(MAX_MP, int(stats["max_mp"])), int(stats["mp"]) + 30)
-            changed = value != int(stats["mp"])
-            stats["mp"] = value
-    if changed:
-        inventory[item_key] = int(inventory[item_key]) - 1
-    general_stats[0] = stats
-    _refresh_item_info()
+func _use_item(item_key: String) -> bool:
+    return rpg_panel.use_item(item_key) if campaign_started else false
 
 
 func _process(delta: float) -> void:
@@ -482,6 +537,8 @@ func _process(delta: float) -> void:
         _finish_round()
     else:
         _refresh()
+        if campaign.elapsed >= next_checkpoint:
+            _save_campaign()
 
 func _settle_round_if_over() -> bool:
     # Damage resolves sequentially: the final general's death ends all actor turns.
@@ -489,15 +546,6 @@ func _settle_round_if_over() -> bool:
         return false
     _finish_round()
     return true
-
-func _refresh_item_info() -> void:
-    if item_info == null:
-        return
-    if not campaign_started:
-        item_info.text = ""
-        return
-    var s: Dictionary = general_stats[0]
-    item_info.text = "測試對象：我軍第1隊主將（數值暫定）\n武力 %d／255　智力 %d／255　忠誠 %d／100\n生命 %.1f／%.0f　技力 %d／%d\n丹藥%d　珠寶%d　生命藥%d　技力藥%d%s" % [s["might"], s["intellect"], s["loyalty"], s["hp"], s["max_hp"], s["mp"], s["max_mp"], inventory["attribute_pill"], inventory["loyalty_jewel"], inventory["hp_elixir"], inventory["mp_elixir"], "\n交戰暫停期間不可使用測試道具。" if campaign.phase == "fighting" else ""]
 
 func _team_defeated(side: int) -> bool:
     for g in generals:
@@ -513,7 +561,7 @@ func _result_text(result: String) -> String:
         "draw": return "雙方武將全滅"
     return ""
 
-func _finish_round() -> void:
+func _finish_round(save: bool = true) -> void:
     active = false
     _recount_armies()
     _refresh()
@@ -525,6 +573,8 @@ func _finish_round() -> void:
     next_round_button.visible = true
     next_round_button.text = "查看戰役結果" if not final_result.is_empty() else "重新選隊"
     field.queue_redraw()
+    if save:
+        _save_campaign()
 
 func _recount_armies() -> void:
     for i in range(units.size()):

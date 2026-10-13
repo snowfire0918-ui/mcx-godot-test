@@ -12,8 +12,14 @@ func check(condition: bool, message: String) -> void:
 func _initialize() -> void:
     call_deferred("run_tests")
 
+func clean_save() -> void:
+    for suffix in ["", ".bak", ".tmp", ".bak.tmp"]:
+        DirAccess.remove_absolute("user://test_battle_simulation.json" + suffix)
+
 func run_tests() -> void:
+    clean_save()
     var ui = load("res://scenes/main.tscn").instantiate()
+    ui.save_path = "user://test_battle_simulation.json"
     root.add_child(ui)
     ui.set_process(false)
     # A full encounter through the real movement, targeting and damage loop.
@@ -92,5 +98,6 @@ func run_tests() -> void:
     check(ui.campaign.last_result == "attacker_victory" and ui.soldiers_visual[100]["hp"] == 10.0,
         "general killing blow stops subsequent actors before extra casualties")
     ui.free()
+    clean_save()
     print("BATTLE_SIMULATION_TESTS: ", checks - failures, "/", checks, " passed")
     quit(1 if failures > 0 else 0)
