@@ -1,11 +1,13 @@
 extends Control
 
-# V0.0.11 adds V1.2 RPG effects and local saves. Art / damage / rosters remain prototypes.
+# V0.0.12 exposes prebattle setup and improves original battlefield presentation.
+# Damage / rosters / skill assignment remain explicitly marked prototype fixtures.
 const Campaign = preload("res://scripts/battle_campaign.gd")
 const PrototypeRoster = preload("res://scripts/prototype_roster.gd")
 const Rules = preload("res://scripts/rpg_rules.gd")
 const Store = preload("res://scripts/campaign_store.gd")
 const RpgPanel = preload("res://scripts/rpg_panel.gd")
+const BattleArt = preload("res://scripts/battle_art.gd")
 const ROUND_SECONDS := 99.0
 const GENERAL_ATTACK_INTERVAL := 0.65
 const FIELD_W := 920.0
@@ -38,6 +40,9 @@ var deploy_button: Button
 var next_round_button: Button
 var resume_button: Button
 var manage_button: Button
+var prebattle_button: Button
+var prepare_after_create := false
+var rpg_return_squads: Array = []
 var rpg_panel: VBoxContainer
 var save_notice: Label
 var save_path := "user://campaign-v1.json"
@@ -75,6 +80,8 @@ func _notification(what: int) -> void:
             reset_dialog.hide()
         elif exit_dialog.visible:
             exit_dialog.hide()
+        elif rpg_panel.visible:
+            _return_from_rpg()
         elif not home.visible:
             _show_home()
         else:
@@ -107,7 +114,7 @@ func _make_ui() -> void:
     var brand := _label("MCX GAMES", 34)
     brand.add_theme_color_override("font_color", Color("#e8c36d"))
     layout.add_child(brand)
-    layout.add_child(_label("三國：我的三國我做主\n第一代豪華重製版 · 測試 V0.0.11", 22))
+    layout.add_child(_label("三國：我的三國我做主\n第一代豪華重製版 · 測試 V0.0.12", 22))
     save_notice = _label("", 16)
     layout.add_child(save_notice)
     home = _column(layout)
@@ -123,7 +130,7 @@ func _make_ui() -> void:
     resume_button.pressed.connect(_resume_campaign)
     home.add_child(resume_button)
     manage_button = _button("武將／道具／軍師技測試")
-    manage_button.pressed.connect(_show_rpg)
+    manage_button.pressed.connect(_open_home_setup)
     home.add_child(manage_button)
     home.add_child(_label("戰役自動保存在本機；重新開啟可繼續。\n交戰每5秒保存，返回首頁時也會保存。", 18))
     reset_dialog = ConfirmationDialog.new()
@@ -160,6 +167,9 @@ func _make_ui() -> void:
         squad_details.append(info)
         selection.add_child(info)
     selection.add_child(_label("未出場的隊伍在本場結束後休整。\n勝隊可以再戰，也可換隊。", 18))
+    prebattle_button = _button("戰前整備 · 軍師技／道具")
+    prebattle_button.pressed.connect(_show_rpg.bind(true))
+    selection.add_child(prebattle_button)
     deploy_button = _button("選定隊伍 · 出戰")
     deploy_button.pressed.connect(_start_selected_round)
     selection.add_child(deploy_button)
@@ -189,7 +199,7 @@ func _make_ui() -> void:
     rpg_panel = RpgPanel.new()
     rpg_panel.theme = theme
     rpg_panel.state_changed.connect(_save_campaign)
-    rpg_panel.return_requested.connect(_show_home)
+    rpg_panel.return_requested.connect(_return_from_rpg)
     layout.add_child(rpg_panel)
 
 func _column(parent: Node) -> VBoxContainer:
@@ -236,7 +246,8 @@ func _button(value: String) -> Button:
     button.custom_minimum_size = Vector2(0, 64)
     return button
 
-func _request_new_campaign() -> void:
+func _request_new_campaign(prepare: bool = false) -> void:
+    prepare_after_create = prepare
     if campaign_started or saved_file_present:
         reset_dialog.popup_centered(Vector2i(mini(560, int(size.x) - 24), 220))
     else:
@@ -260,6 +271,9 @@ func _new_campaign() -> void:
     rpg_panel.bind(campaign, inventory)
     _save_campaign(true)
     _show_selection()
+    if prepare_after_create:
+        prepare_after_create = false
+        _show_rpg(true)
 
 func _show_home(save: bool = true) -> void:
     active = false
@@ -267,19 +281,46 @@ func _show_home(save: bool = true) -> void:
     selection.visible = false
     battle.visible = false
     rpg_panel.visible = false
+    rpg_return_squads.clear()
     resume_button.visible = campaign_started
-    manage_button.visible = campaign_started
+    manage_button.visible = true
+    manage_button.text = "武將／道具／軍師技測試" if campaign_started else "建立戰役並配置軍師技"
     if save:
         _save_campaign()
     scroll.scroll_vertical = 0
 
-func _show_rpg() -> void:
+func _open_home_setup() -> void:
+    if campaign_started:
+        _show_rpg()
+    else:
+        _request_new_campaign(true)
+
+func _show_rpg(from_selection: bool = false) -> void:
     if not campaign_started:
         return
+    var pending: Array = [squad_pickers[0].selected, squad_pickers[1].selected] if from_selection else []
     _show_home()
+    rpg_return_squads = pending
     home.visible = false
+    if from_selection:
+        rpg_panel.side_picker.select(0)
+        rpg_panel.general_picker.select(0)
     rpg_panel.bind(campaign, inventory)
+    if from_selection:
+        # Rebuild the friendly roster before selecting: the previous view may
+        # contain fewer enemy squads than the friendly index being requested.
+        rpg_panel.squad_picker.select(maxi(0, int(pending[0])))
+        rpg_panel.squad_picker.item_selected.emit(rpg_panel.squad_picker.selected)
+    rpg_panel.back_button.text = "返回選隊" if from_selection else "返回首頁"
     rpg_panel.visible = true
+
+func _return_from_rpg() -> void:
+    if not rpg_return_squads.is_empty() and campaign.phase != "fighting":
+        var pending := rpg_return_squads.duplicate()
+        rpg_return_squads.clear()
+        _show_selection(pending)
+    else:
+        _show_home()
 
 func _save_campaign(replace_invalid: bool = false) -> bool:
     if not campaign_started:
@@ -343,7 +384,7 @@ func _resume_campaign() -> void:
         scroll.scroll_vertical = 0
         field.queue_redraw()
 
-func _show_selection() -> void:
+func _show_selection(pending: Array = []) -> void:
     if not campaign_started or campaign.phase == "fighting":
         return
     active = false
@@ -359,7 +400,7 @@ func _show_selection() -> void:
         selection_info.text += "\n上一場：" + _result_text(campaign.last_result)
     for side in range(2):
         var picker := squad_pickers[side]
-        var preferred: int = campaign.selected[side]
+        var preferred: int = pending[side] if pending.size() == 2 else campaign.selected[side]
         picker.clear()
         for index in range(campaign.armies[side].size()):
             var squad: Dictionary = campaign.armies[side][index]
@@ -417,27 +458,34 @@ func _bind_round_actors(reset_positions: bool) -> void:
     for side in range(2):
         var squad: Dictionary = campaign.armies[side][campaign.selected[side]]
         starting_troops[side] = campaign.round_start_troops[side]
-        var base_x: float = 125.0 if side == 0 else 795.0
+        var base_x: float = 240.0 if side == 0 else 680.0
         for slot in range(squad["generals"].size()):
             var g: Dictionary = squad["generals"][slot]
             g.merge({"team": side, "slot": slot}, true)
             if reset_positions or not (g.has("x") and g.has("y") and g.has("cooldown")):
-                g.merge({"x": base_x, "y": 275.0 + float(slot) * 22.0, "cooldown": 0.0}, true)
+                g.merge({"x": 74.0 if side == 0 else 846.0, "y": 88.0 + float(slot) * 99.0, "cooldown": 0.0}, true)
             generals.append(g)
         for kind in range(3):
             var group_id := units.size()
             units.append({"team": side, "kind": kind, "soldiers": 0, "hp": 0})
+            var kind_count := 0
+            for soldier in squad["soldiers"]:
+                if int(soldier["kind"]) == kind:
+                    kind_count += 1
+            # Single-kind squads may use all100 proxies. Keep every initial
+            # position valid for the battlefield and existing save schema.
+            var rank_spacing := minf(22.0, 210.0 / maxf(1.0, ceilf(float(kind_count) / 6.0) - 1.0))
             var n := 0
             for s in squad["soldiers"]:
                 if int(s["kind"]) != kind:
                     continue
-                var column: int = n % 8
-                var row: int = int(n / 8)
+                var column: int = n % 6
+                var row: int = int(n / 6)
                 var direction: float = 1.0 if side == 0 else -1.0
                 s.merge({"team": side, "group": group_id}, true)
                 if reset_positions or not (s.has("x") and s.has("y") and s.has("cooldown")):
-                    s.merge({"x": base_x - direction * float(row) * 13.0 + direction * float(column) * 3.0,
-                        "y": 68.0 + float(kind) * 83.0 + float(column - 4) * 9.0,
+                    s.merge({"x": base_x - direction * float(row) * rank_spacing,
+                        "y": 54.0 + float(kind) * 94.0 + float(column) * 13.0,
                         "cooldown": float(n % 5) * 0.13, "attack_flash": 0.0}, true)
                 s["attack_flash"] = s.get("attack_flash", 0.0)
                 soldiers_visual.append(s)
@@ -655,37 +703,5 @@ func _move_generals(dt: float) -> void:
 func _draw_field() -> void:
     if not battle.visible:
         return
-    var w: float = field.size.x
-    var h: float = field.size.y
-    var scale_x: float = w / FIELD_W
-    field.draw_rect(Rect2(Vector2.ZERO, Vector2(w, h)), Color("#193c30"))
-    for lane in range(4):
-        var y: float = 75.0 + float(lane) * 75.0
-        field.draw_line(Vector2(0.0, y), Vector2(w, y), Color("#315746"), 1.0)
-    for s in soldiers_visual:
-        if float(s["hp"]) <= 0.0:
-            continue
-        var x: float = float(s["x"]) * scale_x
-        var y: float = float(s["y"])
-        var kind: int = int(s["kind"])
-        var team: int = int(s["team"])
-        var color: Color = Color.WHITE if float(s["attack_flash"]) > 0.0 else COLORS[team]
-        field.draw_rect(Rect2(x - 3.0, y - 4.0, 6.0, 9.0), color)
-        field.draw_circle(Vector2(x, y - 6.0), 2.5, Color("#f1d6ae"))
-        if kind == 1:
-            field.draw_line(Vector2(x + 4.0, y - 10.0), Vector2(x + 4.0, y + 5.0), Color("#e8c36d"), 1.0)
-        elif kind == 2:
-            field.draw_line(Vector2(x - 4.0, y - 7.0), Vector2(x + 4.0, y + 4.0), Color("#e9f4ff"), 1.0)
-    # General records are shared with the selected campaign squad.
-    for general in generals:
-        if float(general["hp"]) <= 0.0:
-            continue
-        var team: int = int(general["team"])
-        var general_x: float = float(general["x"]) * scale_x
-        var general_y: float = float(general["y"])
-        field.draw_rect(Rect2(general_x - 9.0, general_y - 15.0, 18.0, 23.0), COLORS[team])
-        field.draw_circle(Vector2(general_x, general_y - 19.0), 7.0, Color("#e8c36d"))
-        var hp_ratio: float = float(general["hp"]) / float(general["max_hp"])
-        field.draw_rect(Rect2(general_x - 13.0, general_y - 32.0, 26.0, 4.0), Color("#182923"))
-        field.draw_rect(Rect2(general_x - 13.0, general_y - 32.0, 26.0 * hp_ratio, 4.0), Color("#90dba4"))
-        field.draw_string(ui_font, Vector2(general_x - 4.0, general_y + 22.0), str(int(general["slot"]) + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
+    BattleArt.background(field, ui_font)
+    BattleArt.actors(field, ui_font, soldiers_visual, generals, campaign.elapsed, active)

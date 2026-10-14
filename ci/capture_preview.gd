@@ -1,6 +1,6 @@
 extends SceneTree
 
-const SAVE := "user://preview-v0011.json"
+const SAVE := "user://preview-v0012.json"
 
 func scene():
     var ui = load("res://scenes/main.tscn").instantiate()
@@ -25,8 +25,7 @@ func capture() -> void:
         DirAccess.remove_absolute(SAVE + suffix)
     var ui = scene()
     await snap("home")
-    ui._new_campaign()
-    ui._show_rpg()
+    ui.manage_button.pressed.emit()
     ui.rpg_panel.target()["hp"] = 120.0
     ui.rpg_panel.target()["mp"] = 45.0
     ui.rpg_panel.support_picker.select(5)
@@ -38,7 +37,11 @@ func capture() -> void:
     ui._resume_campaign()
     await snap("selection")
     ui._start_selected_round()
-    for _frame in range(300):
+    await snap("battle-deployment")
+    for _frame in range(150):
+        ui._process(1.0 / 30.0)
+    await snap("battle-engaged")
+    for _frame in range(150):
         ui._process(1.0 / 30.0)
     await snap("battle")
     ui._show_home()
@@ -49,6 +52,9 @@ func capture() -> void:
     ui.campaign.elapsed = 99.0
     ui._process(0.0)
     await snap("withdrawal")
+    root.size = Vector2i(360, 800)
+    await snap("battle-narrow")
+    root.size = Vector2i(720, 1280)
     ui._show_home()
     ui.notification(Node.NOTIFICATION_WM_GO_BACK_REQUEST)
     await snap("exit-confirmation")
@@ -64,7 +70,7 @@ func capture() -> void:
     ui.notification(Node.NOTIFICATION_WM_GO_BACK_REQUEST)
     await snap("exit-confirmation-narrow")
     ui.free()
-    print("PREVIEW_CAPTURE: 12 desktop images saved in build/qa")
+    print("PREVIEW_CAPTURE: 15 desktop images saved in build/qa")
     quit()
 
 func snap(name: String) -> void:

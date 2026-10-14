@@ -131,6 +131,16 @@ func run_tests() -> void:
         await process_frame
         check(ui.layout.size.x <= width, "selection fits viewport width %d" % width)
         check(ui.deploy_button.size.x <= width, "deploy button fits viewport width %d" % width)
+    # Valid imported/loaded squads may contain all100 proxies of a single kind.
+    ui._new_campaign()
+    ui.campaign.armies[0][0]["soldiers"] = ui.campaign.make_soldiers([1000, 0, 0])
+    ui.campaign.armies[1][0]["soldiers"] = ui.campaign.make_soldiers([0, 0, 1000])
+    ui._start_selected_round()
+    var inside := true
+    for soldier in ui.soldiers_visual:
+        inside = inside and soldier["x"] >= 8.0 and soldier["x"] <= 912.0
+    check(inside, "single-kind100-proxy formations fit both battlefield edges")
+    check(ui._save_campaign() and not ui.save_notice.text.contains("失敗"), "valid single-kind armies remain saveable immediately after deployment")
     ui.free()
     clean_save()
     print("BATTLE_UI_TESTS: ", checks - failures, "/", checks, " passed")
